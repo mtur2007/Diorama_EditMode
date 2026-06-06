@@ -1,7 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js';
 import { createCatenaryTrussTower } from './train_system.js';
 
-export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
+export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options = {}) {
   const lines = [[]];
   let currentLineIndex = 0;
   const segmentMeshes = [];
@@ -18,6 +18,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
   let allowPointAppend = false;
   const createPointScale = 0.1;
   let forcedCreatEnvMap = null;
+  const fixedEnvMapPath = String(options?.fixedEnvMapPath || 'textures/ct.jpg');
   const BEAM_BASE_COLOR = 0x9DA2A1;
 
   function getDefaultPointColor(mesh) {
@@ -25,7 +26,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
   }
 
   const envLoader = new THREE.TextureLoader();
-  envLoader.load('textures/ct.jpg', (texture) => {
+  envLoader.load(fixedEnvMapPath, (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
     forcedCreatEnvMap = texture;
@@ -1362,15 +1363,31 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
 
   function setActive(next) {
     active = Boolean(next);
+    const activeHiddenKey = '__steelFrameModeHiddenByActive';
+    const syncVisible = (mesh) => {
+      if (!mesh) { return; }
+      mesh.userData = mesh.userData || {};
+      const previewHidden = Boolean(mesh.userData.__transientVisible_steel_frame_preview);
+      if (active) {
+        const wasHiddenByActive = Boolean(mesh.userData[activeHiddenKey]);
+        delete mesh.userData[activeHiddenKey];
+        if (wasHiddenByActive && !previewHidden) {
+          mesh.visible = true;
+        }
+        return;
+      }
+      if (mesh.visible !== false || previewHidden) {
+        mesh.userData[activeHiddenKey] = true;
+        mesh.visible = false;
+      }
+    };
     lines.forEach((points) => {
       points.forEach((mesh) => {
-        if (!mesh) { return; }
-        mesh.visible = active;
+        syncVisible(mesh);
       });
     });
     segmentMeshes.forEach((mesh) => {
-      if (!mesh) { return; }
-      mesh.visible = active;
+      syncVisible(mesh);
     });
   }
 

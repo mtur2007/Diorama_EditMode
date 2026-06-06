@@ -17,6 +17,12 @@ let text = ''
 let topNoticeEl = null;
 let topNoticeHideTimer = null;
 
+const CONSTRUCTION_FIXED_ENV_MAP_PATH = 'textures/s.jpg';
+const DAY_SCENE_ENV_MAP_PATH = 'textures/sky.jpg';
+const NIGHT_SCENE_ENV_MAP_PATH = 'textures/moonless_golf.jpg';
+const DAY_TRAIN_ENV_MAP_PATH = 'textures/skyy.jpg';
+const NIGHT_TRAIN_ENV_MAP_PATH = 'textures/shanghai_bund_4k.jpg';
+
 function ensureTopNoticeElement() {
   if (topNoticeEl) { return topNoticeEl; }
   const el = document.createElement('div');
@@ -525,7 +531,7 @@ let constructionFixedEnvMap = null;
 const constructionFixedEnvMaterials = new Set();
 {
   const envLoader = new THREE.TextureLoader();
-  envLoader.load('textures/ct.jpg', (texture) => {
+  envLoader.load(CONSTRUCTION_FIXED_ENV_MAP_PATH, (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
     constructionFixedEnvMap = texture;
@@ -540,12 +546,31 @@ const constructionFixedEnvMaterials = new Set();
 
 function applyConstructionFixedEnvMapToMaterial(mat) {
   if (!mat) { return; }
+  const isSupportedMaterial = Boolean(
+    mat?.isMeshStandardMaterial
+    || mat?.isMeshPhysicalMaterial
+    || mat?.isMeshPhongMaterial
+    || mat?.isMeshLambertMaterial
+  );
+  if (!isSupportedMaterial) { return; }
   constructionFixedEnvMaterials.add(mat);
   if (constructionFixedEnvMap) {
     mat.envMap = constructionFixedEnvMap;
     mat.envMapIntensity = 1.45;
     mat.needsUpdate = true;
   }
+}
+
+function applyConstructionFixedEnvMapToObject(root) {
+  if (!root?.traverse) { return; }
+  root.traverse((node) => {
+    if (!node?.isMesh) { return; }
+    if (Array.isArray(node.material)) {
+      node.material.forEach((mat) => applyConstructionFixedEnvMapToMaterial(mat));
+      return;
+    }
+    applyConstructionFixedEnvMapToMaterial(node.material);
+  });
 }
 
 const canvas = document.getElementById('three-canvas');
@@ -586,7 +611,7 @@ function loadPerformanceSettings() {
 }
 const performanceSettings = loadPerformanceSettings();
 function loadSceneVisibilitySettings() {
-  const fallback = { showTrains: true, showCityModel: true, showDifferenceLineOverlapPreview: true };
+  const fallback = { showTrains: true, showCityModel: true, showDifferenceLineOverlapPreview: false };
   try {
     const raw = window.localStorage.getItem(SCENE_VISIBILITY_SETTINGS_STORAGE_KEY);
     if (!raw) { return fallback; }
@@ -594,7 +619,7 @@ function loadSceneVisibilitySettings() {
     return {
       showTrains: parsed?.showTrains !== false,
       showCityModel: parsed?.showCityModel !== false,
-      showDifferenceLineOverlapPreview: parsed?.showDifferenceLineOverlapPreview !== false,
+      showDifferenceLineOverlapPreview: false,
     };
   } catch (err) {
     console.warn('failed to load scene visibility settings', err);
@@ -1882,12 +1907,38 @@ let differenceSpaceTransformMode = 'none';
     return true;
   }
 
+  function remapStructureGenerationRunUiKeys(prevKey, nextKey) {
+    const from = String(prevKey || '').trim();
+    const to = String(nextKey || '').trim();
+    if (!from || !to || from === to) { return; }
+    if (selectedStructureGenerationRunKey === from) {
+      selectedStructureGenerationRunKey = to;
+    }
+    if (openedStructureGenerationPinDetailKey === from) {
+      openedStructureGenerationPinDetailKey = to;
+    }
+    if (openedStructureGenerationDiagnosticKey === from) {
+      openedStructureGenerationDiagnosticKey = to;
+    }
+    if (openedStructureGenerationAdjustKey === from) {
+      openedStructureGenerationAdjustKey = to;
+    }
+  }
+
   function rerunAdjustedStructureGenerationRun(runLike, nextParams = {}) {
     if (!canAdjustStructureGenerationRun(runLike)) { return false; }
-    updateStructureGenerationRunGroupParams(runLike, nextParams);
-    const ok = rerunStructureGenerationRun(runLike);
-    renderStructureGenerationList();
-    return ok;
+    const prevParams = (runLike?.params && typeof runLike.params === 'object') ? runLike.params : {};
+    const mergedParams = {
+      ...prevParams,
+      lateralOffset: Number.isFinite(Number(nextParams?.lateralOffset)) ? Number(nextParams.lateralOffset) : Number(prevParams?.lateralOffset) || 0,
+      verticalOffset: Number.isFinite(Number(nextParams?.verticalOffset)) ? Number(nextParams.verticalOffset) : Number(prevParams?.verticalOffset) || 0,
+      yawOffsetDeg: Number.isFinite(Number(nextParams?.yawOffsetDeg)) ? Number(nextParams.yawOffsetDeg) : Number(prevParams?.yawOffsetDeg) || 0,
+      spacing: Number.isFinite(Number(nextParams?.spacing)) ? Number(nextParams.spacing) : Number(prevParams?.spacing) || 0,
+    };
+    return rerunStructureGenerationRun(runLike, {
+      overrideParams: mergedParams,
+      commitParams: true,
+    });
   }
 
   function focusCameraOnStructurePin(pinLike) {
@@ -1941,6 +1992,8 @@ let differenceSpaceTransformMode = 'none';
 
   function renderStructureGenerationList() {
     if (!structureGenerationList || !structureGenerationListSummary) { return; }
+    const prevPanelScrollTop = structureGenerationListPanel?.scrollTop ?? 0;
+    const prevListScrollTop = structureGenerationList?.scrollTop ?? 0;
     const runs = Array.isArray(structureGenerationRuns) ? structureGenerationRuns.slice() : [];
     if (selectedStructureGenerationRunKey) {
       const hasSelected = runs.some((run) => buildGenerationRunDedupKey(run) === selectedStructureGenerationRunKey);
@@ -1977,6 +2030,15 @@ let differenceSpaceTransformMode = 'none';
       empty.textContent = 'ピンから生成した構造物がここに表示されます。';
       structureGenerationList.appendChild(empty);
       refreshStructurePinnedPinColors();
+      requestAnimationFrame(() => {
+        if (structureGenerationListPanel) {
+          structureGenerationListPanel.scrollTop = prevPanelScrollTop;
+        }
+        if (structureGenerationList) {
+          structureGenerationList.scrollTop = prevListScrollTop;
+        }
+        scheduleClampUiPanels();
+      });
       return;
     }
     orderedRuns.forEach((run, index) => {
@@ -2159,6 +2221,15 @@ let differenceSpaceTransformMode = 'none';
       structureGenerationList.appendChild(item);
     });
     refreshStructurePinnedPinColors();
+    requestAnimationFrame(() => {
+      if (structureGenerationListPanel) {
+        structureGenerationListPanel.scrollTop = prevPanelScrollTop;
+      }
+      if (structureGenerationList) {
+        structureGenerationList.scrollTop = prevListScrollTop;
+      }
+      scheduleClampUiPanels();
+    });
   }
 
   function setStructureGenerationListPanelVisible(visible) {
@@ -2762,11 +2833,14 @@ let differenceSpaceTransformMode = 'none';
     return category.length > 0;
   }
 
-  function rerunStructureGenerationRun(runLike) {
+  function rerunStructureGenerationRun(runLike, options = {}) {
     if (!canRegenerateStructureRun(runLike)) { return false; }
     const category = String(runLike?.category || '').trim();
     const runtimeId = String(runLike?._pinGenerationRuntimeId || '').trim();
-    const params = (runLike?.params && typeof runLike.params === 'object') ? runLike.params : {};
+    const baseParams = (runLike?.params && typeof runLike.params === 'object') ? runLike.params : {};
+    const params = (options?.overrideParams && typeof options.overrideParams === 'object')
+      ? options.overrideParams
+      : baseParams;
     const pinsPayload = normalizePinsPayload(runLike?.pins);
     console.log('[structure regenerate] start', {
       category,
@@ -2807,6 +2881,12 @@ let differenceSpaceTransformMode = 'none';
       runtimeId,
       ok,
     });
+    if (ok && options?.commitParams && options?.overrideParams && typeof options.overrideParams === 'object') {
+      const prevKey = buildGenerationRunDedupKey(runLike);
+      updateStructureGenerationRunGroupParams(runLike, options.overrideParams);
+      const nextKey = buildGenerationRunDedupKey(runLike);
+      remapStructureGenerationRunUiKeys(prevKey, nextKey);
+    }
     const regeneratedTargets = collectPinGeneratedObjectsByRuntimeId(runtimeId);
     console.log('[structure regenerate] target summary after rerun', {
       category,
@@ -8202,6 +8282,12 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
           pivot: rotatePivot,
           panelAngles: savedAngles,
         });
+        const segmentsToRebuild = copiedObjectsForRotate
+          .filter((mesh) => mesh?.name === 'SteelFrameSegment')
+          .filter((mesh) => Array.isArray(mesh?.userData?.steelFrameSegmentPointRefs) && mesh.userData.steelFrameSegmentPointRefs.length >= 2);
+        if (segmentsToRebuild.length > 0) {
+          steelFrameMode?.rebuildSegmentsForMeshes?.(segmentsToRebuild);
+        }
       }
       console.info('[group_copy_restore] restored entry', {
         entryIndex,
@@ -10793,6 +10879,7 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       line3: 'ご注意ください',
     };
     renderLedBoardTexture(board);
+    applyConstructionFixedEnvMapToObject(board);
     return board;
   }
 
@@ -10839,6 +10926,7 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
     hanger.userData = { ...(hanger.userData || {}), decorationRoot: lightBody };
     lightBody.add(hanger);
 
+    applyConstructionFixedEnvMapToObject(lightBody);
     return lightBody;
   }
 
@@ -10961,7 +11049,7 @@ pmremGenerator.compileEquirectangularShader();
 let envMap = null
 let envMapNight = null
 const loader = new THREE.TextureLoader();
-  loader.load('textures/sky.jpg', (texture) => {
+  loader.load(DAY_SCENE_ENV_MAP_PATH, (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
     scene.background = texture;
@@ -10969,7 +11057,7 @@ const loader = new THREE.TextureLoader();
     envMap = texture;
   });
 
-loader.load('textures/moonless_golf.jpg', (texture_night) => {
+loader.load(NIGHT_SCENE_ENV_MAP_PATH, (texture_night) => {
   texture_night.mapping = THREE.EquirectangularReflectionMapping;
   texture_night.colorSpace = THREE.SRGBColorSpace;
   // scene.background = texture_night;
@@ -11002,7 +11090,7 @@ function syncTrainEnvMapReference() {
   }
 }
 
-loader.load('textures/skyy.jpg', (ref) => {
+loader.load(DAY_TRAIN_ENV_MAP_PATH, (ref) => {
   ref.mapping = THREE.EquirectangularReflectionMapping;
   ref.colorSpace = THREE.SRGBColorSpace;
   const processed = pmremGenerator.fromEquirectangular(ref);
@@ -11013,7 +11101,7 @@ loader.load('textures/skyy.jpg', (ref) => {
   }
 });
 
-loader.load('textures/shanghai_bund_4k.jpg', (ref_night) => {
+loader.load(NIGHT_TRAIN_ENV_MAP_PATH, (ref_night) => {
   ref_night.mapping = THREE.EquirectangularReflectionMapping;
   ref_night.colorSpace = THREE.SRGBColorSpace;
   const processed = pmremGenerator.fromEquirectangular(ref_night);
@@ -14867,6 +14955,27 @@ function showRailGeneratedStructures() {
     } else if (mesh.material) {
       if ('opacity' in mesh.material) { mesh.material.opacity = 1; }
       mesh.material.transparent = false;
+    }
+  });
+}
+
+function setTransientMeshListVisible(list, visible, reason = 'preview') {
+  const key = `__transientVisible_${String(reason || 'preview')}`;
+  const activeHiddenKey = '__steelFrameModeHiddenByActive';
+  (Array.isArray(list) ? list : []).forEach((mesh) => {
+    if (!mesh || !mesh.isMesh) { return; }
+    mesh.userData = mesh.userData || {};
+    if (!visible) {
+      if (!(key in mesh.userData)) {
+        mesh.userData[key] = mesh.visible !== false;
+      }
+      mesh.visible = false;
+      return;
+    }
+    if (key in mesh.userData) {
+      const restoreVisible = Boolean(mesh.userData[key]);
+      delete mesh.userData[key];
+      mesh.visible = mesh.userData[activeHiddenKey] ? false : restoreVisible;
     }
   });
 }
@@ -20264,7 +20373,9 @@ function findCurveRange(curve, targetA, targetB, { axis = 'z', resolution = 1000
 // 物体描画
 const cube_geometry = new THREE.BoxGeometry();
 const cube_material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-const steelFrameMode = createSteelFrameMode(scene, cube_geometry, cube_material);
+const steelFrameMode = createSteelFrameMode(scene, cube_geometry, cube_material, {
+  fixedEnvMapPath: CONSTRUCTION_FIXED_ENV_MAP_PATH,
+});
 structureLinkRuntimeReady = true;
 if (!structureGenerationReplayPending && structureGenerationRuns.length < 1) {
   scheduleRebuildStructureLinkedObjects({ resetRetry: false });
@@ -20623,6 +20734,10 @@ function handleMouseMove(x, y) {
 function setMeshListOpacity(list, opacity) {
   list.forEach((mesh) => {
     if (!mesh || !mesh.isMesh) { return; }
+    if (mesh?.userData?.steelFramePoint) {
+      setTransientMeshListVisible([mesh], opacity > 0, 'steel_frame_preview');
+      return;
+    }
     if (mesh.name === 'AddPointGridHandle') {
       if (mesh.material) {
         if (Array.isArray(mesh.material)) {
@@ -37437,6 +37552,7 @@ export function UIevent (uiID, toggle){
 
   } else {
     console.log( 'see _inactive' )
+    setMeshListOpacity(steelFrameMode.getAllPointMeshes(), 1);
   }} else if ( uiID === 'edit' ){ if ( toggle === 'active' ){
     console.log( 'edit _active' )
     OperationMode = 1
@@ -37832,11 +37948,13 @@ export function UIevent (uiID, toggle){
       .filter((mesh) => Boolean(mesh?.userData?.steelFrameCopiedObject))
       .forEach((mesh) => setCopyObjectVisual(mesh, false));
     targetObjects = steelFrameMode.getCurrentPointMeshes()
-    setMeshListOpacity(targetObjects, 1);
+    setMeshListOpacity(steelFrameMode.getAllPointMeshes(), 1);
     setGuideGridVisibilityForViewMode(false);
 
   }} else if ( uiID === 'decoration' ){ if ( toggle === 'active' ){
     steelFrameMode.setActive(true);
+    targetObjects = getSteelFrameAddPointTargets();
+    setMeshListOpacity(steelFrameMode.getAllPointMeshes(), 1);
   } else { 
 
   }} else if ( uiID === 'add_point' ){ if ( toggle === 'active' ){
