@@ -1,7 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js';
 import { createCatenaryTrussTower } from './train_system.js';
 
-export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options = {}) {
+export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
   const lines = [[]];
   let currentLineIndex = 0;
   const segmentMeshes = [];
@@ -18,15 +18,16 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
   let allowPointAppend = false;
   const createPointScale = 0.1;
   let forcedCreatEnvMap = null;
-  const fixedEnvMapPath = String(options?.fixedEnvMapPath || 'textures/ct.jpg');
   const BEAM_BASE_COLOR = 0x9DA2A1;
+  const MIN_STYLE_DIMENSION = 0.001;
+  const MIN_STYLE_RADIUS = MIN_STYLE_DIMENSION * 0.5;
 
   function getDefaultPointColor(mesh) {
     return mesh?.userData?.steelFrameCopied ? copiedPointColor : pointColor;
   }
 
   const envLoader = new THREE.TextureLoader();
-  envLoader.load(fixedEnvMapPath, (texture) => {
+  envLoader.load('textures/ct.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
     forcedCreatEnvMap = texture;
@@ -84,10 +85,11 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     }
     if (p === 'corrugated_bar') {
       return {
-        // corrugated_bar: X=全幅, Y=断面ロール角(度), Z=波密度(幅1あたりの波数)
+        // corrugated_bar: X=全幅, Y=波高, Z=波密度(幅1あたりの波数)
         beamWidthHorizontal: 0.8,
-        beamHeightVertical: 0.0,
+        beamHeightVertical: 0.14,
         beamThickness: 5.0,
+        beamRollDeg: 0,
       };
     }
     if (p === 'h_beam' || p === 't_beam' || p === 'l_beam') {
@@ -154,16 +156,16 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
           : (Number.isFinite(merged.beamHeightVertical)
             ? merged.beamHeightVertical
             : base.beamWidthHorizontal));
-      const diameter = Math.max(0.01, diameterRaw);
+      const diameter = Math.max(MIN_STYLE_DIMENSION, diameterRaw);
       return {
         beamWidthHorizontal: diameter,
         beamHeightVertical: diameter,
         beamThickness: diameter,
       };
     }
-    const width = Number.isFinite(merged.beamWidthHorizontal) ? Math.max(0.01, merged.beamWidthHorizontal) : base.beamWidthHorizontal;
+    const width = Number.isFinite(merged.beamWidthHorizontal) ? Math.max(MIN_STYLE_DIMENSION, merged.beamWidthHorizontal) : base.beamWidthHorizontal;
     if (p === 'corrugated_bar') {
-      const angleRaw = Number.isFinite(merged.beamHeightVertical) ? merged.beamHeightVertical : base.beamHeightVertical;
+      const waveHeightRaw = Number.isFinite(merged.beamHeightVertical) ? merged.beamHeightVertical : base.beamHeightVertical;
       let densityRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
       if (Number.isFinite(merged.beamThickness) && merged.beamThickness < 0.3) {
         // 旧データ(板厚)との互換: 低すぎる値は波密度既定値に寄せる
@@ -171,8 +173,11 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
       }
       return {
         beamWidthHorizontal: width,
-        beamHeightVertical: THREE.MathUtils.clamp(angleRaw, -180, 180),
+        beamHeightVertical: THREE.MathUtils.clamp(waveHeightRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.9)),
         beamThickness: THREE.MathUtils.clamp(densityRaw, 0.5, 24),
+        beamRollDeg: Number.isFinite(merged.beamRollDeg)
+          ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
+          : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
       };
     }
     if (p === 'truss_column' || p === 'truss_ladder') {
@@ -181,7 +186,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
       return {
         beamWidthHorizontal: width,
         beamHeightVertical: Math.max(0.08, panelLenRaw),
-        beamThickness: THREE.MathUtils.clamp(memberRaw, 0.01, Math.max(0.01, width * 0.35)),
+        beamThickness: THREE.MathUtils.clamp(memberRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.35)),
         beamRollDeg: Number.isFinite(merged.beamRollDeg)
           ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
           : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
@@ -191,9 +196,9 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
       const panelLenRaw = Number.isFinite(merged.beamHeightVertical) ? merged.beamHeightVertical : base.beamHeightVertical;
       const memberRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
       return {
-        beamWidthHorizontal: Math.max(0.04, width),
+        beamWidthHorizontal: Math.max(MIN_STYLE_DIMENSION, width),
         beamHeightVertical: Math.max(0.04, panelLenRaw),
-        beamThickness: THREE.MathUtils.clamp(memberRaw, 0.01, Math.max(0.01, width * 0.4)),
+        beamThickness: THREE.MathUtils.clamp(memberRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.4)),
         beamRollDeg: Number.isFinite(merged.beamRollDeg)
           ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
           : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
@@ -202,21 +207,21 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     if (p === 'panel_wall') {
       const targetLen = Number.isFinite(merged.beamWidthHorizontal) ? Math.max(0.2, merged.beamWidthHorizontal) : base.beamWidthHorizontal;
       const wallHeight = Number.isFinite(merged.beamHeightVertical) ? Math.max(0.5, merged.beamHeightVertical) : base.beamHeightVertical;
-      const thickness = Number.isFinite(merged.beamThickness) ? THREE.MathUtils.clamp(merged.beamThickness, 0.001, 0.05) : base.beamThickness;
+      const thickness = Number.isFinite(merged.beamThickness) ? THREE.MathUtils.clamp(merged.beamThickness, MIN_STYLE_DIMENSION, 0.05) : base.beamThickness;
       return {
         beamWidthHorizontal: targetLen,
         beamHeightVertical: wallHeight,
         beamThickness: thickness,
       };
     }
-    const height = Number.isFinite(merged.beamHeightVertical) ? Math.max(0.02, merged.beamHeightVertical) : base.beamHeightVertical;
+    const height = Number.isFinite(merged.beamHeightVertical) ? Math.max(MIN_STYLE_DIMENSION, merged.beamHeightVertical) : base.beamHeightVertical;
     const maxThickness = (p === 'rect_bar')
       ? Math.max(0, Math.min(width, height) * 0.5)
-      : Math.max(0.01, Math.min(width, height) * 0.45);
+      : Math.max(MIN_STYLE_DIMENSION, Math.min(width, height) * 0.45);
     const thicknessRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
     const thickness = THREE.MathUtils.clamp(
       thicknessRaw,
-      p === 'rect_bar' ? 0 : 0.01,
+      p === 'rect_bar' ? 0 : MIN_STYLE_DIMENSION,
       maxThickness,
     );
     const next = {
@@ -302,7 +307,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
 
     const dims = normalizeBeamStyle('round', style);
     const diameter = Number(dims?.beamWidthHorizontal);
-    const radius = Number.isFinite(diameter) ? Math.max(0.005, diameter * 0.5) : 0.08;
+    const radius = Number.isFinite(diameter) ? Math.max(MIN_STYLE_RADIUS, diameter * 0.5) : 0.08;
     const geometry = new THREE.CylinderGeometry(radius, radius, len, 10);
     const material = createCreatStandardMaterial(BEAM_BASE_COLOR);
     const mesh = new THREE.Mesh(geometry, material);
@@ -380,13 +385,13 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
   }
 
   function createCorrugatedProfileShape(width, waveHeight, waveDensity = 5) {
-    const safeW = Math.max(0.02, Number(width) || 0.8);
-    const safeH = Math.max(0.02, Number(waveHeight) || 0.22);
+    const safeW = Math.max(MIN_STYLE_DIMENSION, Number(width) || 0.8);
+    const safeH = Math.max(MIN_STYLE_DIMENSION, Number(waveHeight) || 0.22);
     const halfW = safeW * 0.5;
     const halfH = safeH * 0.5;
     // 波高は維持したまま、板そのものの肉厚だけを薄くする。
-    const t = THREE.MathUtils.clamp(safeH * 0.16, 0.006, Math.max(0.006, safeH * 0.30));
-    const amp = Math.max(0.001, halfH - (t * 0.5));
+    const t = THREE.MathUtils.clamp(safeH * 0.16, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, safeH * 0.30));
+    const amp = Math.max(MIN_STYLE_RADIUS, halfH - (t * 0.5));
     const density = THREE.MathUtils.clamp(Number(waveDensity) || 5, 0.5, 24);
     const waves = Math.max(1, Math.round(safeW * density));
     const samples = Math.max(24, waves * 18);
@@ -416,10 +421,10 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
 
     const dims = normalizeBeamStyle('corrugated_bar', style);
     const width = Number(dims?.beamWidthHorizontal) || 0.8;
-    const rollDeg = Number(dims?.beamHeightVertical) || 0;
+    const waveHeight = Number(dims?.beamHeightVertical) || 0.14;
     const waveDensity = Number(dims?.beamThickness) || 5;
-    const fixedWaveHeight = 0.14;
-    const profileShape = createCorrugatedProfileShape(width, fixedWaveHeight, waveDensity);
+    const rollDeg = Number(dims?.beamRollDeg) || 0;
+    const profileShape = createCorrugatedProfileShape(width, waveHeight, waveDensity);
     const geometry = new THREE.ExtrudeGeometry(profileShape, {
       depth: len,
       bevelEnabled: false,
@@ -465,7 +470,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     if (len < 0.001) { return null; }
 
     const dims = normalizeBeamStyle('tubular', style);
-    const radius = Math.max(0.005, Number(dims?.beamWidthHorizontal || 0.14) * 0.5);
+    const radius = Math.max(MIN_STYLE_RADIUS, Number(dims?.beamWidthHorizontal || 0.14) * 0.5);
     const geometry = new THREE.CylinderGeometry(radius, radius, len, 14);
     // Unlit bright white so it looks emissive without adding lights.
     const material = new THREE.MeshBasicMaterial({
@@ -492,11 +497,11 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     if (len < 0.001) { return null; }
 
     const dims = normalizeBeamStyle('truss_column', style);
-    const width = Math.max(0.06, Number(dims?.beamWidthHorizontal) || 0.22);
+    const width = Math.max(MIN_STYLE_DIMENSION, Number(dims?.beamWidthHorizontal) || 0.22);
     const panelLen = Math.max(0.08, Number(dims?.beamHeightVertical) || 0.42);
-    const memberSize = Math.max(0.01, Number(dims?.beamThickness) || 0.03);
+    const memberSize = Math.max(MIN_STYLE_DIMENSION, Number(dims?.beamThickness) || 0.03);
     const rollDeg = Number(dims?.beamRollDeg) || 0;
-    const diagonalSize = Math.max(0.008, memberSize * 0.55);
+    const diagonalSize = Math.max(MIN_STYLE_DIMENSION, memberSize * 0.55);
     const half = width * 0.5;
     const bayCount = Math.max(1, Math.round(len / panelLen));
     const actualPanelLen = len / bayCount;
@@ -570,9 +575,9 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     if (len < 0.001) { return null; }
 
     const dims = normalizeBeamStyle('truss_ladder', style);
-    const width = Math.max(0.06, Number(dims?.beamWidthHorizontal) || 0.24);
+    const width = Math.max(MIN_STYLE_DIMENSION, Number(dims?.beamWidthHorizontal) || 0.24);
     const panelLen = Math.max(0.08, Number(dims?.beamHeightVertical) || 0.4);
-    const memberSize = Math.max(0.01, Number(dims?.beamThickness) || 0.028);
+    const memberSize = Math.max(MIN_STYLE_DIMENSION, Number(dims?.beamThickness) || 0.028);
     const rollDeg = Number(dims?.beamRollDeg) || 0;
     const half = width * 0.5;
     const bayCount = Math.max(1, Math.round(len / panelLen));
@@ -634,7 +639,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     if (len < 0.001) { return null; }
 
     const dims = normalizeBeamStyle('truss_catenary', style);
-    const sideLength = Math.max(0.04, Number(dims?.beamWidthHorizontal) || 0.1);
+    const sideLength = Math.max(MIN_STYLE_DIMENSION, Number(dims?.beamWidthHorizontal) || 0.1);
     const rollDeg = Number(dims?.beamRollDeg) || 0;
     const tower = createCatenaryTrussTower(len, { sideLength });
     const roundedHeight = Math.max(0.001, Number(tower?.userData?.catenaryTrussHeight) || len);
@@ -679,7 +684,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
     }
     const tubularSegments = THREE.MathUtils.clamp(Math.round(Math.max(approxLen * 20, points.length * 12)), 24, 960);
     const dims = normalizeBeamStyle('tube', style);
-    const radius = Math.max(0.005, Number(dims?.beamWidthHorizontal || 0.14) * 0.5);
+    const radius = Math.max(MIN_STYLE_RADIUS, Number(dims?.beamWidthHorizontal || 0.14) * 0.5);
     const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 14, false);
     const material = createCreatStandardMaterial(BEAM_BASE_COLOR);
     const mesh = new THREE.Mesh(geometry, material);
@@ -1363,31 +1368,15 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial, options 
 
   function setActive(next) {
     active = Boolean(next);
-    const activeHiddenKey = '__steelFrameModeHiddenByActive';
-    const syncVisible = (mesh) => {
-      if (!mesh) { return; }
-      mesh.userData = mesh.userData || {};
-      const previewHidden = Boolean(mesh.userData.__transientVisible_steel_frame_preview);
-      if (active) {
-        const wasHiddenByActive = Boolean(mesh.userData[activeHiddenKey]);
-        delete mesh.userData[activeHiddenKey];
-        if (wasHiddenByActive && !previewHidden) {
-          mesh.visible = true;
-        }
-        return;
-      }
-      if (mesh.visible !== false || previewHidden) {
-        mesh.userData[activeHiddenKey] = true;
-        mesh.visible = false;
-      }
-    };
     lines.forEach((points) => {
       points.forEach((mesh) => {
-        syncVisible(mesh);
+        if (!mesh) { return; }
+        mesh.visible = active;
       });
     });
     segmentMeshes.forEach((mesh) => {
-      syncVisible(mesh);
+      if (!mesh) { return; }
+      mesh.visible = active;
     });
   }
 

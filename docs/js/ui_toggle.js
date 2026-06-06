@@ -181,6 +181,21 @@ const UI_BUTTON_META = {
         svg: MOVE_POINT_ICON_SVG,
         variant: 'icon-square',
     },
+    face_move: {
+        label: '面方向移動',
+        icon: '面',
+        variant: 'icon-square',
+    },
+    plane_move: {
+        label: '平面移動',
+        icon: '平面',
+        variant: 'icon-square',
+    },
+    height_move: {
+        label: '高さ移動',
+        icon: '高さ',
+        variant: 'icon-square',
+    },
     move_structure: {
         label: '移動',
         svg: MOVE_POINT_ICON_SVG,
@@ -576,7 +591,11 @@ const uiTree = {
             'Difference': {
                 'space': {
                     'add': '',
-                    'move': '',
+                    'move': {
+                        'face_move': '',
+                        'plane_move': '',
+                        'height_move': '',
+                    },
                     'rotation': '',
                     'scale': '',
                     'tube': '',

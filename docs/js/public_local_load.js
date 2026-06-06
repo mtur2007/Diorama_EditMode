@@ -39,7 +39,7 @@ function showBootError(error) {
   if (bootPanel) {
     bootPanel.innerHTML = `
       <p class="boot-title">LOCAL RUNTIME VIEWER</p>
-      <p class="boot-text">index.html の読込に失敗しました。</p>
+      <p class="boot-text">vewbasis.html の読込に失敗しました。</p>
       <p class="boot-text">${String(error?.message || error)}</p>
     `;
   }
@@ -193,7 +193,7 @@ async function bootThumbnailMode() {
   thumbnailApp.hidden = false;
 
   const params = getSearchParams();
-  const iframeUrl = `./index.html?${params.toString()}`;
+  const iframeUrl = `./vewbasis.html?${params.toString()}`;
   thumbnailFrame.src = iframeUrl;
   thumbnailFrame.addEventListener("load", () => {
     setThumbnailStatus("ワールドを操作して構図を決めてください。右下のカメラで撮影します。");
@@ -201,9 +201,9 @@ async function bootThumbnailMode() {
 }
 
 async function bootIndexDocument() {
-  const response = await fetch("./index.html", { cache: "no-store" });
+  const response = await fetch("./vewbasis.html", { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`index.html fetch failed: ${response.status}`);
+    throw new Error(`vewbasis.html fetch failed: ${response.status}`);
   }
   const html = await response.text();
   document.open();

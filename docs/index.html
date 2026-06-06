@@ -2,3100 +2,494 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>都市を走る鉄道模型 DEMO</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>都市を走る鉄道模型 | Terminal</title>
+  <meta
+    name="description"
+    content="都市を走る鉄道模型の公開・編集・配布・ビューワー導線をまとめたターミナルページです。"
+  />
+  <link rel="stylesheet" href="./css/public.css" />
   <style>
-    #loading-overlay {
-      position: fixed;
-      left: 0;
-      top: 0;
-      width: 1px;
-      height: 1px;
-      background-color: #0f1726;
-      z-index: 2147483647;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 10px;
-      overflow: hidden;
-      background:
-        radial-gradient(circle at 20% 20%, rgba(90, 146, 255, 0.24), transparent 40%),
-        linear-gradient(180deg, rgba(8, 14, 24, 0.96), rgba(10, 18, 30, 0.96));
-      color: #eaf3ff;
-      transition: opacity 260ms ease, visibility 260ms ease;
-    }
-    #loading-overlay.is-hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-    .loading-panel {
-      min-width: min(80vw, 360px);
-      padding: 18px 20px;
-      border-radius: 12px;
-      border: 1px solid rgba(154, 198, 255, 0.36);
-      background: rgba(14, 24, 42, 0.72);
-      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
-      text-align: center;
-      backdrop-filter: blur(8px);
-    }
-    .loading-title {
-      margin: 0 0 10px 0;
-      font-size: 14px;
-      letter-spacing: 0.08em;
-      opacity: 0.96;
-    }
-    #loading-text {
-      margin: 0;
-      font-size: 12px;
-      color: #c7ddff;
-    }
-    .loading-bar {
-      width: 100%;
-      height: 7px;
-      margin: 10px 0 6px;
-      border-radius: 999px;
-      background: rgba(163, 196, 250, 0.2);
-      overflow: hidden;
-    }
-    .loading-bar-fill {
-      width: 0%;
-      height: 100%;
-      background: linear-gradient(90deg, #4a92ff, #66d6ff);
-      transition: width 200ms ease;
-    }
-
-    @font-face {
-      font-family: 'KH Dot Akihabara';
-      src: url('fonts/KH-Dot-Akihabara-16.ttf') format('truetype');
-      font-weight: normal;
-      font-style: normal;
-      font-display: swap;
-    }
-    html, body {
-      margin: 0;
-      min-height: 100%;
-      background-color: #0f1726;
-      overscroll-behavior-y: none;
-      overscroll-behavior-x: none;
-    }
-    body {
-      overflow: auto;
-      overflow-x: hidden;
-      font-family: 'KH Dot Akihabara', 'Noto Sans JP', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-      background-color: #0f1726;
-    }
-    /* Three.js のキャンバス状態 */
-    #three-canvas.full-canvas {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      display: block;
-      z-index: 0;
-      background: transparent;
-    }
-    #three-canvas.intro-canvas {
-      position: relative;
-      /* プレビュー時はキャンバスのサイズを自動にして親要素内で中央に配置する */
-      width: auto;
-      height: auto;
-      max-width: 100%;
-      max-height: 100%;
-      display: block;
-      margin: auto;
-      z-index: 0;
-      background: transparent;
-      border-radius: 6px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.6);
-    }
-  </style>
-  <style>
-    /* LED-style marquee (電光掲示板風) */
-    .led-marquee {
-      overflow: hidden;
-      background: rgba(0,0,0,0.85);
-      color: #00ff66;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 18px;
-      line-height: 1;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.6);
-      display: block;
-      width: 100%;
-      box-sizing: border-box;
-      -webkit-font-smoothing: antialiased;
-      font-variant-ligatures: none;
-    }
-    .led-marquee__inner {
-      
-      display: grid;
-      grid-template-rows: repeat(3, 1fr);
-      align-items: center;
-      gap: 0; /* 単一メッセージを1回流すため gap は不要 */
-      white-space: nowrap;
-      will-change: transform;
-      animation-timing-function: linear;
-
-      /* animation-name / duration は JS で設定 */
-    }
-    .led-marquee__text { display: inline-block; }
-    .led-marquee:hover .led-marquee__inner { animation-play-state: paused; }
-    
-    @keyframes marquee {
-      from { transform: translateX(var(--marquee-from, 100%)); }
-      to   { transform: translateX(var(--marquee-to, -100%)); }
-    }
-
-    /* 左固定表示（流さない行） */
-    .led-row.static .led-marquee__text{
-      transform: none !important;
-    }
-
-    /* static の時は inner 全体のアニメを使わないので、行単位で制御する */
-    .led-row .led-marquee__text{
-      will-change: transform;
-    }
-
-    @keyframes marqueeRow {
-      from { transform: translateX(var(--row-from, 100%)); }
-      to   { transform: translateX(var(--row-to, -100%)); }
-    }
-
-    .led-color-white  { color:#ffffff; text-shadow:0 0 8px rgba(255,255,255,.8); }
-    .led-color-green  { color:#00ff66; text-shadow:0 0 8px rgba(0,255,102,.8); }
-    .led-color-orange { color:#ffb347; text-shadow:0 0 8px rgba(255,77,77,.8); }
-    .led-color-red    { color:#ff4d4d; text-shadow:0 0 8px rgba(255,77,77,.8); }
-    .led-color-blue   { color:#7be6ff; text-shadow:0 0 8px rgba(123, 143, 255, 0.8); }
-    .led-color-yellow { color:#ffe35a; text-shadow:0 0 8px rgba(255,227,90,.8); }
-    .led-color-pink   { color:#ff69b4; text-shadow:0 0 8px rgba(255,105,180,.8); }
-
-    .led-row.theme-orange .led-marquee__text { color:#ff6200; text-shadow:0 0 10px rgba(255,77,77,.8); }
-    .led-row.theme-green .led-marquee__text { color:#00ff66b8; text-shadow:0 0 10px rgba(0, 255, 102, 0.507); }
-    .led-row.theme-alert .led-marquee__text { color:#ff4d4d; text-shadow:0 0 10px rgba(255,77,77,.8); }
-    .led-row.theme-info  .led-marquee__text { color:#7be6ff; text-shadow:0 0 10px rgba(123,230,255,.7); }
-    .led-row.theme-local .led-marquee__text { color:#ffe35a; text-shadow:0 0 10px rgba(255,227,90,.7); }
-
-
-  </style>
-    <style>
-      /* Welcome overlay: disable internal scrolling so page scroll controls navigation */
-        #welcome { overflow: visible; -webkit-overflow-scrolling: auto; }
-        .welcome-content { max-height: none; overflow: visible; -webkit-overflow-scrolling: auto; }
-    </style>
-  <style>
-    /* 操作説明パネル */
-    #instructions-panel {
-      position: fixed;
-      top: 80px;
-      /* width: 320px; */
-      max-width: calc(100% - 32px);
-      max-height: calc(80vh);
-      overflow: auto;
-      background: rgba(255,255,255,0.95);
-      color: #111;
-      padding: 12px;
-      border-radius: 8px;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.2);
-      z-index: 9999;
-      display: none;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-    #show-instructions-btn {
-      position: fixed;
-      right: 12px;
-      bottom: 20px;
-      top: auto;
-      display: none;
-      z-index: 10000;
-      padding: 8px 12px;
-      background: rgba(0,0,0,0.6);
-      color: white;
-      border-radius: 6px;
-      border: none;
-      cursor: pointer;
-      backdrop-filter: blur(4px);
-      touch-action: manipulation;
-    }
-  </style>
-
-  <style>
-    /* Canvas 上に重ねる UI 用コンテナ */
-    #three-ui {
-      position: absolute; /* intro 時は intro-wrapper 内で相対配置 */
-      inset: 0;
-      display: none; /* 初期状態は非表示。表示切替はJSで行う */
-      pointer-events: none; /* 子要素のみ反応させる */
-      z-index: 2;
-    }
-    /* canvas 内に移動した UI 要素はこれを付与して操作可能にする */
-    .canvas-ui { pointer-events: auto; }
-  </style>
-  <style>
-    /* Dragging: prevent text selection */
-    body.dragging, body.dragging * {
-      user-select: none;
-      -webkit-user-select: none;
-      -moz-user-select: none;
-      -ms-user-select: none;
-    }
-  </style>
-  <style>
-    /* UiGroup tooltip */
-    #UiGroup { position: fixed; }
-    .ui-tooltip {
-      position: absolute;
-      z-index: 2147483647;
-      padding: 6px 8px;
-      background: rgba(0,0,0,0.85);
-      color: #fff;
-      font-size: 11px;
-      line-height: 1.3;
-      border-radius: 6px;
-      white-space: nowrap;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(2px);
-      transition: opacity 120ms ease, transform 120ms ease;
-    }
-    .ui-tooltip.is-visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  </style>
-
-  <style>
-    /* 拡大表示時に canvas のみ表示するクラス */
-    body.only-canvas > * { display: none !important; }
-    body.only-canvas #three-canvas {
-      display: block !important;
-      position: fixed !important;
-      inset: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      z-index: 2147483646 !important;
-      background: transparent !important;
-    }
-    /* ただし three-ui（キャンバス上の UI）は表示する */
-    body.only-canvas #three-ui { display: block !important; position: fixed !important; inset: 0 !important; z-index: 2147483647 !important; pointer-events: auto !important; }
-    body.only-canvas .canvas-ui { pointer-events: auto !important; }
-    body.only-canvas #loading-overlay { display: flex !important; }
-    /* 拡大表示中はドラッグ時のテキスト選択(青ハイライト)を無効化 */
-    body.only-canvas {
-      -webkit-user-select: none;
-      user-select: none;
-    }
-    /* ただし UI 入力欄は選択可能 */
-    body.only-canvas input,
-    body.only-canvas textarea {
-      -webkit-user-select: text;
-      user-select: text;
-    }
-  </style>
-
-  <!-- Google Analytics 設定 閲覧数の測定用です。-->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-B8X9Y12345"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-E7Z2FM74H9');
-  </script>
-  <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-  <script type="importmap-shim">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
-      "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.3/build/index.module.js",
-      "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.js"
-    }
-  }
-  </script>
-</head>
-<body>
-  <div id="loading-overlay" role="status" aria-live="polite" aria-label="ロード中">
-    <div class="loading-panel">
-      <p class="loading-title">LOADING SCENE</p>
-      <div class="loading-bar" aria-hidden="true">
-        <div id="loading-bar-fill" class="loading-bar-fill"></div>
-      </div>
-      <p id="loading-text">読み込み中...</p>
-    </div>
-  </div>
-<!--   
-  <button id="speed-up" class="no-touch-highlight" style="position: fixed; left: 20px; bottom: 200px; width: 60px; height: 60px; font-size: 24px; border-radius: 30px; z-index: 20; opacity: 0.3;">▶︎▷</button>
-
-  <button id="speed-down" class="no-touch-highlight" style="position: fixed; left: 95px; bottom: 200px; width: 60px; height: 60px; font-size: 24px; border-radius: 30px; z-index: 20; opacity: 0.3;">◀︎◁</button>
-  
-  <button id="btn-up" class="no-touch-highlight" style="position: fixed; left: 20px; bottom: 120px; width: 60px; height: 60px; font-size: 24px; border-radius: 30px; z-index: 20; opacity: 0.3;">🔺</button>
-  
-  <button id="btn-down" class="no-touch-highlight" style="position: fixed; left: 20px; bottom: 40px; width: 60px; height: 60px; font-size: 24px; border-radius: 30px; z-index: 20; opacity: 0.3;">🔻</button> -->
-  <style>
-    :root {
-      --bg-top: #0f1726;
-      --bg-bottom: #1d2f4d;
-      --panel-bg: rgba(14, 22, 36, 0.72);
-      --panel-border: rgba(180, 210, 255, 0.24);
-      --text-main: #eef5ff;
-      --text-sub: #c2d4ee;
-      --accent: #58a6ff;
-      --accent-strong: #3c8dff;
-      --shadow-deep: 0 16px 40px rgba(0, 0, 0, 0.45);
-    }
-
-    .section {
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: transparent;
-      z-index: 200;
-      min-height: 72vh;
-      padding: 18px 0 0 0;
-      margin: 0;
-    }
-    html {
-      background:
-        radial-gradient(circle at 10% 10%, rgba(91, 159, 255, 0.28), transparent 42%),
-        radial-gradient(circle at 80% 5%, rgba(89, 216, 255, 0.16), transparent 36%),
-        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
-      background-attachment: fixed;
-    }
-    body {
-      background:
-        radial-gradient(circle at 10% 10%, rgba(91, 159, 255, 0.28), transparent 42%),
-        radial-gradient(circle at 80% 5%, rgba(89, 216, 255, 0.16), transparent 36%),
-        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
-      color: var(--text-main);
-      line-height: 1.6;
-    }
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      background:
-        radial-gradient(circle at 10% 10%, rgba(91, 159, 255, 0.28), transparent 42%),
-        radial-gradient(circle at 80% 5%, rgba(89, 216, 255, 0.16), transparent 36%),
-        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
-    }
-
-    .section + .section { margin-top: 0; padding-top: 0; }
-    .welcome-content { margin-bottom: 0; padding-bottom: 0; }
-    .glass-panel {
-      width: min(1080px, 90vw);
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      backdrop-filter: blur(10px);
-      box-shadow: var(--shadow-deep);
-      padding: 24px;
-    }
-    .intro-layout {
-      display: flex;
-      gap: 16px;
+    .terminal-hero {
+      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
       align-items: stretch;
-      flex-wrap: wrap;
-      margin-top: 12px;
     }
-    #intro-wrapper {
-      flex: 1 1 540px;
-      min-height: 440px;
-      max-width: 700px;
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(160, 196, 255, 0.2);
-      border-radius: 12px;
-      padding: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .terminal-copy {
       position: relative;
       overflow: hidden;
+      border-color: rgba(122, 223, 255, 0.38);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(84, 213, 255, 0.2), transparent 34%),
+        linear-gradient(180deg, rgba(10, 19, 37, 0.96), rgba(8, 14, 27, 0.94));
     }
-    .welcome-side {
-      flex: 1 1 280px;
-      min-width: 240px;
-      display: grid;
-      align-content: start;
-      gap: 12px;
+    .terminal-copy::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -80px auto;
+      width: 280px;
+      height: 280px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(78, 142, 255, 0.22), transparent 66%);
+      pointer-events: none;
     }
-    .preview-card {
-      background: rgba(10, 18, 32, 0.62);
-      border: 1px solid rgba(149, 187, 246, 0.26);
-      border-radius: 12px;
-      padding: 16px;
-      color: var(--text-main);
+    .terminal-heading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
-    .preview-card h2 {
-      margin: 0 0 8px 0;
-      font-size: 18px;
-      color: #f4f8ff;
+    .signal-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(132, 231, 255, 0.36);
+      background: rgba(7, 18, 36, 0.76);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: #cfeeff;
     }
-    .preview-card ul,
-    #instructions-panel ul {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--text-sub);
+    .signal-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #8cffaa;
+      box-shadow: 0 0 10px rgba(140, 255, 170, 0.8);
     }
-    .preview-card p {
-      margin: 0;
-      color: var(--text-sub);
-      font-size: 13px;
+    .terminal-copy .lead {
+      max-width: 56ch;
     }
-    .preview-actions {
+    .terminal-actions {
+      margin-top: 22px;
       display: flex;
       gap: 10px;
-      justify-content: center;
       flex-wrap: wrap;
     }
-    #preview-start {
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: transform 120ms ease, filter 120ms ease;
+    .route-summary {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
     }
-    #preview-start {
-      padding: 14px 20px;
-      font-size: 18px;
-      background: linear-gradient(135deg, #2a84ff, #206fe6);
-      color: #fff;
-      box-shadow: 0 8px 20px rgba(16, 86, 189, 0.45);
+    .route-pill {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(150, 196, 255, 0.18);
+      background: rgba(5, 12, 24, 0.54);
     }
-    #preview-start:hover {
-      filter: brightness(1.08);
-      transform: translateY(-1px);
+    .route-pill strong {
+      display: block;
+      font-size: 16px;
+      color: #f2f8ff;
     }
-
-    .control-button {
-      position: absolute;
-      width: 60px;
-      height: 60px;
-      font-size: 24px;
-      border: 1px solid rgba(164, 194, 255, 0.3);
-      border-radius: 30px;
-      background-color: rgba(14, 26, 44, 0.65);
-      color: #ecf3ff;
-      z-index: 20;
-      backdrop-filter: blur(4px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-      transition: all 0.1s ease-in-out;
-      user-select: none;
-      -webkit-user-select: none;
-      -moz-user-select: none;
-      -ms-user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-touch-callout: none;
+    .route-pill span {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      color: #a8c4e4;
     }
-
-  .control-square-button {
-    position: relative;
-    width: auto;
-    min-width: 120px;
-    height: 40px;
-    font-size: 14px;
-    border: 1px solid rgba(164, 194, 255, 0.35);
-    border-radius: 8px;
-    background-color: rgba(14, 26, 44, 0.72);
-    color: #eef6ff;
-    z-index: 20;
-    backdrop-filter: blur(4px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.35);
-    transition: all 0.1s ease-in-out;
-
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-touch-callout: none;
-    touch-action: manipulation;
-  }
-  .log-control-square-button {
-    position: relative;
-    width: min(70vw, 720px);
-    height: min(40vh, 380px);
-    font-size: 14px;
-    border: none;
-    border-radius: 10px;
-    background-color: rgba(242, 248, 255, 0.92);
-    color: #1d2a3c;
-    z-index: 20;
-    backdrop-filter: blur(4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
-    transition: all 0.1s ease-in-out;
-
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-touch-callout: none;
-  }
-  #map-load-status {
-    position: absolute;
-    left: 20px;
-    top: 68px;
-    z-index: 11;
-    min-height: 18px;
-    max-width: min(88vw, 760px);
-    padding: 4px 8px;
-    border-radius: 6px;
-    background: rgba(14, 26, 44, 0.62);
-    border: 1px solid rgba(164, 194, 255, 0.22);
-    color: #dfeeff;
-    font-size: 11px;
-    line-height: 1.3;
-    pointer-events: none;
-    backdrop-filter: blur(4px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  #save-buttons {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
-    width: 100%;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    gap: 0 !important;
-    justify-content: flex-start;
-    padding: 4px 10px 4px 120px;
-    border-top: 1px solid rgba(96, 103, 113, 0.72);
-    border-bottom: 1px solid rgba(96, 103, 113, 0.72);
-    border-left: none;
-    border-right: none;
-    border-radius: 0;
-    background: rgba(22, 22, 24, 0.92);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-    overflow: hidden;
-  }
-  #save-buttons .control-square-button {
-    min-width: auto;
-    height: 38px;
-    padding: 0 18px !important;
-    border: none;
-    border-right: 1px solid rgba(78, 82, 90, 0.9);
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    color: #f1f1f1;
-    font-size: 13px !important;
-    letter-spacing: 0.01em;
-  }
-  #save-buttons .control-square-button:last-child {
-    border-right: none;
-  }
-  #save-buttons .control-square-button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.06);
-  }
-  #save-buttons .control-square-button:disabled {
-    color: rgba(241, 241, 241, 0.38);
-    cursor: default;
-  }
-  #save-buttons #save-world-data {
-    margin-left: auto;
-    border-right: none;
-    border-left: 1px solid rgba(78, 82, 90, 0.9);
-    border-radius: 8px;
-    background: rgba(48, 48, 52, 0.96);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    color: #fbfbfb;
-    font-weight: 600;
-  }
-  #save-buttons #save-world-data:hover {
-    background: rgba(66, 66, 72, 0.98);
-  }
-
-  /* ホバー（マウスを乗せたとき）で暗くする */
-  .control-button:hover {
-    filter: brightness(85%);
-    cursor: pointer;
-  }
-
-  /* クリック中（押してる最中）でさらに暗くする */
-  .control-button:active {
-    filter: brightness(70%);
-  }
-
-  /* アイコンの重ねラッパー */
-  .icon-wrapper {
-    position: relative;
-    display: flex;              /* 中央寄せ用 */
-    align-items: center;        /* 縦中央 */
-    justify-content: center;    /* 横中央 */
-    width: 2em;                 /* ボタンに合わせて大きめに */
-    height: 2em;
+    .terminal-status {
+      display: grid;
+      gap: 14px;
     }
-
-  /* 薄い背景記号 */
-  .background-icon {
-    position: absolute;
-    color: rgba(0, 0, 0, 0.5);
-    font-size: 1.5em;
-  }
-  /* 濃い前面記号 */
-  .foreground-icon {
-    position: absolute;
-    color: black;
-    font-size: 1.3em;
-  }
-  
-  .credits-footer {
-    position: relative;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(9, 16, 28, 0.92);
-    border-top: 1px solid rgba(150, 184, 238, 0.25);
-    color: #d9e8ff;
-    padding: 8px 12px;
-    font-size: 12px;
-    text-align: center;
-    z-index: 9999;
-    box-shadow: 0 -1px 10px rgba(0,0,0,0.2);
-  }
-  .credits-footer a { color: #8cc8ff; text-decoration: underline; }
-
-  /* コントローラーのスタイル */
-  .circle-ctrl-area {
-    position: absolute;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.95);
-    background: rgba(0,0,0,0.5);
-    border: 2px solid #333;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    transform: translate(-50%, -50%); /* left/top を中心にする */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-    touch-action: none;
-    cursor: grab;
-    pointer-events: auto;
-  }
-  /* .circle-ctrl-area { cursor: grabbing; } */
-
-  .circle-ctrl {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: rgba(0,0,0,0.5);
-    border: 2px solid #fff;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    transform: translate(-50%, -50%); /* left/top を中心にする */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-    touch-action: none;
-    cursor: grab;
-    pointer-events: auto;
-  }
-  /* .circle-ctrl:active { cursor: grabbing; } */
-  #UiGroup {
-    position: relative; /* ここを基準にする */
-    /* width: 10%;
-    height: 590px;
-    border: 1px solid rgba(195, 219, 255, 0.25);
-    border-radius: 10px;
-    background: rgba(8, 16, 28, 0.45);
-    backdrop-filter: blur(8px); */
-  }
-  #UiGroup button {
-    position: absolute; /* top が効くようにする */
-    left: 0;
-    width: 72px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid rgba(180, 208, 255, 0.32);
-    background: rgba(10, 20, 36, 0.85);
-    color: #e6f1ff;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
-    cursor: pointer;
-    transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease, border-color 140ms ease;
-  }
-  #UiGroup button:hover {
-    transform: translateX(2px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-  }
-  #UiGroup button.ui-icon-button {
-    width: 42px;
-    height: 42px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    font-size: 20px;
-    line-height: 1;
-    border-color: rgba(150, 208, 255, 0.44);
-    background:
-      radial-gradient(circle at 30% 30%, rgba(118, 188, 255, 0.34), rgba(12, 23, 40, 0.92) 68%),
-      rgba(10, 20, 36, 0.9);
-    box-shadow:
-      0 12px 22px rgba(0, 0, 0, 0.34),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  }
-  #UiGroup button.ui-icon-button:hover {
-    transform: translateX(0) scale(1.05);
-    box-shadow:
-      0 14px 26px rgba(0, 0, 0, 0.38),
-      0 0 0 4px rgba(86, 152, 255, 0.12);
-  }
-  #UiGroup button.ui-icon-button-square {
-    width: 42px;
-    height: 42px;
-    border-radius: 4px;
-    background:
-      linear-gradient(180deg, rgba(58, 58, 58, 0.98), rgba(44, 44, 44, 0.98)),
-      rgba(42, 42, 42, 0.98);
-    border-color: rgba(118, 118, 118, 0.48);
-    color: #f3f3f3;
-    box-shadow:
-      0 8px 14px rgba(0, 0, 0, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.34);
-  }
-  #UiGroup button.ui-icon-button-square:hover {
-    transform: translateX(0) translateY(-1px);
-    box-shadow:
-      0 10px 18px rgba(0, 0, 0, 0.34),
-      0 0 0 2px rgba(196, 196, 196, 0.08);
-  }
-  #UiGroup button.ui-icon-button:focus-visible {
-    outline: 2px solid rgba(138, 196, 255, 0.88);
-    outline-offset: 3px;
-  }
-  #UiGroup .ui-icon-glyph {
-    width: 24px;
-    height: 24px;
-    stroke: currentColor;
-    fill: none;
-    stroke-width: 1.35;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    filter: none;
-  }
-  #UiGroup .ui-icon-glyph-filled {
-    stroke: none;
-  }
-  #UiGroup button.ui-icon-glyph-decoration .ui-icon-glyph {
-    width: 28px;
-    height: 28px;
-  }
-  #UiGroup .ui-icon-glyph-accent {
-    color: currentColor;
-  }
-  #frontViewButtons {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-  #frontViewButtons .frontViewBtn {
-    border: 1px solid rgba(164, 194, 255, 0.35);
-    border-radius: 8px;
-    background: rgba(12, 26, 46, 0.78);
-    color: #e6f2ff;
-    padding: 7px 10px;
-    font-size: 13px;
-    cursor: pointer;
-    transition: filter 120ms ease, transform 120ms ease;
-  }
-  #frontViewButtons .frontViewBtn:hover {
-    filter: brightness(1.1);
-    transform: translateY(-1px);
-  }
-  #toggle-daynight {
-    border: 1px solid rgba(164, 194, 255, 0.34);
-    background: rgba(12, 26, 46, 0.78);
-    color: #ebf5ff;
-    box-shadow: 0 6px 14px rgba(0,0,0,0.35);
-    cursor: pointer;
-  }
-  #create-mode-utility-buttons {
-    position: fixed;
-    top: 70px;
-    left: 20px;
-    right: 20px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    justify-content: flex-start;
-    pointer-events: none;
-  }
-  body.creat-mode-ui-active #create-mode-utility-buttons,
-  body.edit-mode-ui-active #create-mode-utility-buttons {
-    justify-content: flex-end;
-  }
-  #create-mode-utility-buttons > button {
-    position: static !important;
-    left: auto !important;
-    right: auto !important;
-    top: auto !important;
-    pointer-events: auto;
-  }
-  #instructions-panel,
-  #rotation-panel {
-    border: 1px solid rgba(170, 200, 250, 0.3);
-  }
-  #group-point-edit-mode-panel {
-    border: 1px solid rgba(170, 200, 250, 0.34);
-    backdrop-filter: blur(6px);
-  }
-  #group-point-edit-mode-panel .group-point-edit-row {
-    display: grid;
-    grid-template-columns: 72px 1fr 1fr;
-    gap: 6px;
-    align-items: center;
-  }
-  #group-point-edit-mode-panel .group-point-edit-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #213245;
-    white-space: nowrap;
-  }
-  #group-point-edit-mode-panel .group-point-edit-btn {
-    padding: 6px 8px;
-    font-size: 11px;
-    border-radius: 8px;
-    border: 1px solid #c5d1df;
-    background: #ffffff;
-    color: #415167;
-    cursor: pointer;
-  }
-  #group-point-edit-mode-panel .group-point-edit-caption {
-    margin-top: 8px;
-    font-size: 10px;
-    line-height: 1.45;
-    color: #546476;
-  }
-  #rotation-panel input,
-  #rotation-apply {
-    border-radius: 8px;
-  }
-  #rotation-panel .panel-input-wrap {
-    position: relative;
-    width: 100%;
-  }
-  #rotation-panel .panel-axis-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  #rotation-panel .panel-axis-row .panel-input-wrap input {
-    padding-right: 8px;
-  }
-  #rotation-panel .panel-axis-tool {
-    width: 24px;
-    height: 24px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    border-radius: 7px;
-    border: 1px solid #c3d0e6;
-    background: #f2f7ff;
-    color: #1f3658;
-    cursor: pointer;
-    padding: 0;
-    flex: 0 0 auto;
-  }
-  #rotation-panel .panel-axis-tool svg {
-    width: 14px;
-    height: 14px;
-    pointer-events: none;
-  }
-  #rotation-panel .panel-axis-tool:hover {
-    filter: brightness(0.97);
-  }
-  #rotation-panel .panel-axis-tool.is-picking {
-    border-color: #2b80ff;
-    background: #d9e9ff;
-    box-shadow: 0 0 0 1px rgba(43, 128, 255, 0.35) inset;
-  }
-  #rotation-panel .panel-axis-tool.is-linked {
-    border-color: #a86fff;
-    background: #f2eaff;
-    color: #6232a8;
-  }
-  #rotation-panel .panel-axis-tool.panel-axis-unlink {
-    border-color: #dfc5c5;
-    background: #fff0f0;
-    color: #8b4040;
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1;
-  }
-  #rotation-panel .panel-axis-tool.panel-axis-lock {
-    border-color: #c9d3c4;
-    background: #f4f9f1;
-    color: #2f4c2c;
-    font-size: 13px;
-    line-height: 1;
-  }
-  #rotation-panel .panel-axis-tool.panel-axis-lock.is-locked {
-    border-color: #57905a;
-    background: #dff1df;
-    color: #1f5d28;
-  }
-  #rotation-panel .panel-input-mask {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    left: 8px;
-    height: 1.2em;
-    background: #ffffff;
-    pointer-events: none;
-    z-index: 2;
-    width: 0;
-    border-radius: 2px;
-  }
-  #rotation-panel .panel-input-ghost {
-    position: absolute;
-    left: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 11px;
-    color: rgba(118, 118, 118, 0.62);
-    font-weight: 400;
-    pointer-events: none;
-    z-index: 1;
-    white-space: pre;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: calc(100% - 16px);
-  }
-  #rotation-panel input::placeholder {
-    color: transparent;
-  }
-  #rotation-panel input {
-    position: relative;
-    z-index: 3;
-    font-weight: 600;
-    background: transparent;
-  }
-  #rotation-apply {
-    border: 1px solid rgba(160, 194, 252, 0.45);
-    background: linear-gradient(135deg, #2a84ff, #246fd9);
-    color: #fff;
-    cursor: pointer;
-  }
-  #difference-panel {
-    position: fixed;
-    right: 20px;
-    top: 360px;
-    width: 250px;
-    padding: 12px;
-    background: rgba(255,255,255,0.92);
-    border-radius: 10px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 10003;
-    display: none;
-    pointer-events: auto;
-    border: 1px solid rgba(170, 200, 250, 0.3);
-    color: #1a2533;
-  }
-  #difference-panel .difference-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  #difference-panel .difference-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  #difference-panel label {
-    font-size: 11px;
-    color: #2b4057;
-  }
-  #difference-panel select {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid #bcd5ee;
-    padding: 4px 6px;
-    font-size: 12px;
-    color: #1a2533;
-    background: #fff;
-  }
-  #difference-status {
-    margin: 0;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #4a5f78;
-  }
-  #difference-unify-button {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(160, 194, 252, 0.45);
-    background: linear-gradient(135deg, #2a84ff, #246fd9);
-    color: #fff;
-    cursor: pointer;
-    padding: 6px 8px;
-    font-size: 12px;
-    margin-bottom: 8px;
-  }
-  #difference-unify-button:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-  #construction-category-panel {
-    position: fixed;
-    right: 20px;
-    top: 120px;
-    width: 280px;
-    max-height: calc(100vh - 140px);
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 12px;
-    background: rgba(255,255,255,0.92);
-    border-radius: 10px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 10003;
-    display: none;
-    pointer-events: auto;
-    border: 1px solid rgba(170, 200, 250, 0.3);
-    color: #1a2533;
-  }
-  #construction-category-panel .construction-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  #construction-category-panel .construction-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  #construction-category-panel .construction-pattern-row {
-    display: none;
-    margin-bottom: 8px;
-  }
-  #construction-category-panel .construction-pattern-label {
-    margin: 0 0 6px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #45607f;
-  }
-  #construction-category-panel .construction-pattern-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  #construction-category-panel .construction-card {
-    appearance: none;
-    border: 1px solid rgba(90, 120, 170, 0.35);
-    border-radius: 10px;
-    background: #f9fbff;
-    padding: 6px;
-    text-align: center;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-  }
-  #construction-category-panel .construction-card.is-selected {
-    border-color: #2f74e2;
-    box-shadow: 0 0 0 2px rgba(47, 116, 226, 0.2) inset;
-    background: #eef5ff;
-  }
-  #construction-category-panel .construction-card img {
-    width: 100%;
-    height: 56px;
-    object-fit: contain;
-    border-radius: 6px;
-    background: linear-gradient(180deg, #f2f7ff, #f8fbff);
-    border: 1px solid rgba(130, 160, 210, 0.25);
-  }
-  #construction-category-panel .construction-card span {
-    font-size: 10px;
-    line-height: 1.2;
-    color: #2c405a;
-  }
-  #construction-category-panel .construction-pattern-card {
-    appearance: none;
-    border: 1px solid rgba(90, 120, 170, 0.35);
-    border-radius: 10px;
-    background: #f9fbff;
-    padding: 6px;
-    text-align: center;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-  }
-  #construction-category-panel .construction-pattern-card.is-selected {
-    border-color: #2f74e2;
-    box-shadow: 0 0 0 2px rgba(47, 116, 226, 0.2) inset;
-    background: #eef5ff;
-  }
-  #construction-category-panel .construction-pattern-card img {
-    width: 100%;
-    height: 48px;
-    object-fit: contain;
-    border-radius: 6px;
-    background: linear-gradient(180deg, #f2f7ff, #f8fbff);
-    border: 1px solid rgba(130, 160, 210, 0.25);
-  }
-  #construction-category-panel .construction-pattern-card span {
-    font-size: 10px;
-    line-height: 1.2;
-    color: #2c405a;
-  }
-  #construction-generate-button {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(160, 194, 252, 0.45);
-    background: linear-gradient(135deg, #2a84ff, #246fd9);
-    color: #fff;
-    cursor: pointer;
-    padding: 7px 8px;
-    font-size: 12px;
-    margin-bottom: 8px;
-  }
-  #construction-category-status {
-    margin: 0;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #4a5f78;
-  }
-  #rail-construction-panel {
-    position: fixed;
-    right: 20px;
-    top: 120px;
-    width: 320px;
-    max-height: calc(100vh - 140px);
-    overflow: auto;
-    padding: 12px;
-    background: rgba(255,255,255,0.92);
-    border-radius: 10px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 10003;
-    display: none;
-    pointer-events: auto;
-    border: 1px solid rgba(170, 200, 250, 0.3);
-    color: #1a2533;
-  }
-  #rail-construction-panel .rail-construction-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  #rail-construction-panel .rail-construction-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  #rail-construction-panel .rail-construction-card {
-    appearance: none;
-    border: 1px solid rgba(90, 120, 170, 0.35);
-    border-radius: 10px;
-    background: #f9fbff;
-    padding: 6px;
-    text-align: center;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    align-items: center;
-  }
-  #rail-construction-panel .rail-construction-card.is-selected {
-    border-color: #2f74e2;
-    box-shadow: 0 0 0 2px rgba(47, 116, 226, 0.2) inset;
-    background: #eef5ff;
-  }
-  #rail-construction-panel .rail-construction-card img {
-    width: 100%;
-    height: 44px;
-    object-fit: contain;
-    border-radius: 6px;
-    background: linear-gradient(180deg, #f2f7ff, #f8fbff);
-    border: 1px solid rgba(130, 160, 210, 0.25);
-  }
-  #rail-construction-panel .rail-construction-card span {
-    font-size: 9px;
-    line-height: 1.2;
-    color: #2c405a;
-  }
-  #rail-construction-group-row {
-    display: none;
-    margin-bottom: 8px;
-  }
-  #rail-construction-offset-row {
-    display: none;
-    margin-bottom: 8px;
-  }
-  #rail-construction-offset-row .offset-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  #rail-construction-offset-row label {
-    display: block;
-    font-size: 11px;
-    color: #2b3f57;
-    margin-bottom: 4px;
-  }
-  #rail-construction-offset-row input {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(153, 183, 231, 0.65);
-    background: #f6faff;
-    color: #203149;
-    padding: 6px 8px;
-    font-size: 12px;
-    box-sizing: border-box;
-  }
-  #rail-construction-group-row label {
-    display: block;
-    font-size: 11px;
-    color: #2b3f57;
-    margin-bottom: 4px;
-  }
-  #rail-construction-group-select {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(153, 183, 231, 0.65);
-    background: #f6faff;
-    color: #203149;
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-  #rail-construction-generate-button {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(160, 194, 252, 0.45);
-    background: linear-gradient(135deg, #2a84ff, #246fd9);
-    color: #fff;
-    cursor: pointer;
-    padding: 7px 8px;
-    font-size: 12px;
-    margin-bottom: 8px;
-  }
-  #rail-construction-status {
-    margin: 0;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #4a5f78;
-  }
-  #structure-generation-list-panel {
-    position: fixed;
-    right: 20px;
-    top: 120px;
-    width: 320px;
-    max-height: calc(100vh - 140px);
-    overflow: auto;
-    padding: 12px;
-    background: rgba(255,255,255,0.92);
-    border-radius: 10px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 10003;
-    display: none;
-    pointer-events: auto;
-    border: 1px solid rgba(170, 200, 250, 0.3);
-    color: #1a2533;
-  }
-  #structure-generation-list-panel .structure-generation-list-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  #structure-generation-list-summary {
-    margin: 0 0 8px;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #4a5f78;
-  }
-  #structure-generation-list {
-    display: grid;
-    gap: 8px;
-  }
-  .structure-generation-list-empty {
-    margin: 0;
-    padding: 10px;
-    border-radius: 8px;
-    background: #f4f8ff;
-    border: 1px solid rgba(130, 160, 210, 0.2);
-    color: #4a5f78;
-    font-size: 11px;
-    line-height: 1.5;
-  }
-  .structure-generation-list-item {
-    padding: 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(90, 120, 170, 0.24);
-    background: linear-gradient(180deg, #f9fbff, #edf4ff);
-    cursor: pointer;
-    transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
-  }
-  .structure-generation-list-item:hover {
-    border-color: rgba(90, 120, 170, 0.42);
-  }
-  .structure-generation-list-item.is-selected {
-    border-color: rgba(201, 142, 28, 0.8);
-    background: linear-gradient(180deg, #fff6d9, #ffeab0);
-    box-shadow: 0 0 0 2px rgba(255, 201, 51, 0.24);
-  }
-  .structure-generation-list-item-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
-  .structure-generation-list-item-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: #24364d;
-  }
-  .structure-generation-list-item-index {
-    font-size: 10px;
-    color: #6480a2;
-  }
-  .structure-generation-list-item-meta {
-    font-size: 10px;
-    line-height: 1.45;
-    color: #46617e;
-  }
-  .structure-generation-list-item-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-  }
-  .structure-generation-list-item-actions button {
-    flex: 1;
-    border-radius: 8px;
-    border: 1px solid rgba(90, 120, 170, 0.28);
-    background: #f8fbff;
-    color: #27405d;
-    cursor: pointer;
-    padding: 6px 8px;
-    font-size: 11px;
-  }
-  .structure-generation-list-item-actions button:hover {
-    background: #eef5ff;
-  }
-  .structure-generation-list-item-pin-detail {
-    margin-top: 8px;
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid rgba(90, 120, 170, 0.18);
-    background: rgba(255,255,255,0.72);
-    color: #38506b;
-    font-size: 10px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .structure-generation-list-item-pin-detail button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    margin: 0;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: rgba(233, 242, 255, 0.96);
-    color: #38506b;
-    cursor: pointer;
-    font-size: 10px;
-    line-height: 1.5;
-  }
-  .structure-generation-list-item-pin-detail button:hover {
-    background: rgba(216, 232, 255, 0.98);
-  }
-  .structure-generation-list-item-pin-detail button + button {
-    margin-top: 6px;
-  }
-  .structure-generation-list-item-diagnostic {
-    margin-top: 8px;
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid rgba(190, 132, 58, 0.24);
-    background: rgba(255, 248, 232, 0.92);
-    color: #5b4529;
-    font-size: 10px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .structure-generation-list-item-adjust {
-    margin-top: 8px;
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid rgba(90, 120, 170, 0.2);
-    background: rgba(247, 250, 255, 0.96);
-  }
-  .structure-generation-list-item-adjust-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  .structure-generation-list-item-adjust label {
-    display: block;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #46617e;
-  }
-  .structure-generation-list-item-adjust input {
-    width: 100%;
-    margin-top: 4px;
-    box-sizing: border-box;
-    border-radius: 6px;
-    border: 1px solid rgba(90, 120, 170, 0.26);
-    padding: 5px 6px;
-    font-size: 11px;
-    color: #24364d;
-    background: #fff;
-  }
-  .structure-generation-list-item-adjust-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-  }
-  .structure-generation-list-item-adjust-actions button {
-    flex: 1;
-    border-radius: 8px;
-    border: 1px solid rgba(90, 120, 170, 0.28);
-    background: #f8fbff;
-    color: #27405d;
-    cursor: pointer;
-    padding: 6px 8px;
-    font-size: 11px;
-  }
-  .structure-generation-list-item-adjust-note {
-    margin-top: 6px;
-    font-size: 10px;
-    line-height: 1.4;
-    color: #5a728f;
-  }
-  #group-mode-panel {
-    position: fixed;
-    right: 20px;
-    top: 520px;
-    width: 300px;
-    padding: 12px;
-    background: rgba(255,255,255,0.92);
-    border-radius: 10px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 10003;
-    display: none;
-    pointer-events: auto;
-    border: 1px solid rgba(170, 200, 250, 0.3);
-    color: #1a2533;
-  }
-  #group-mode-panel .group-mode-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-  #group-mode-panel .group-mode-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  #group-mode-panel label {
-    font-size: 11px;
-    color: #2b3f57;
-  }
-  #group-mode-track-select {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(153, 183, 231, 0.65);
-    background: #f6faff;
-    color: #203149;
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-  #group-mode-id-select {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(153, 183, 231, 0.65);
-    background: #f6faff;
-    color: #203149;
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-  #group-mode-create-button,
-  #group-mode-arrange-button,
-  #group-mode-append-button {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(160, 194, 252, 0.45);
-    background: linear-gradient(135deg, #2a84ff, #246fd9);
-    color: #fff;
-    cursor: pointer;
-    padding: 7px 8px;
-    font-size: 12px;
-  }
-  #group-mode-arrange-button {
-    margin-top: 6px;
-  }
-  #group-mode-append-button {
-    margin-top: 6px;
-  }
-  #group-mode-create-button:disabled,
-  #group-mode-arrange-button:disabled,
-  #group-mode-append-button:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-  #group-mode-status {
-    margin: 8px 0 0;
-    font-size: 10px;
-    line-height: 1.45;
-    color: #4a5f78;
-    white-space: pre-line;
-  }
-
-  .edit-guide {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-  .edit-guide .guide-block {
-    background: rgba(8, 17, 29, 0.62);
-    border: 1px solid rgba(169, 202, 255, 0.2);
-    border-radius: 12px;
-    padding: 14px;
-  }
-  .edit-guide .guide-block h3 {
-    margin: 0 0 8px 0;
-    font-size: 15px;
-    color: #f0f6ff;
-  }
-  .edit-guide .guide-block ul {
-    margin: 0 0 0 18px;
-    line-height: 1.7;
-    color: var(--text-sub);
-  }
-
-  #guide-window {
-    position: fixed;
-    right: 20px;
-    bottom: 24px;
-    width: 340px;
-    max-width: calc(100% - 40px);
-    background: rgba(255, 255, 255, 0.92);
-    color: #111;
-    border-radius: 14px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.25);
-    padding: 14px;
-    z-index: 10001;
-    display: none;
-    pointer-events: auto;
-    backdrop-filter: blur(6px);
-  }
-  #guide-window .guide-title {
-    font-size: 14px;
-    letter-spacing: 0.06em;
-    font-weight: 700;
-    margin: 0 0 10px;
-  }
-  #guide-window .guide-sub {
-    font-size: 11px;
-    color: #555;
-    margin: 0 0 12px;
-  }
-  #guide-window .guide-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  #guide-window .guide-card {
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 10px;
-    padding: 10px;
-    background: rgba(250, 250, 250, 0.9);
-    min-height: 62px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 6px;
-  }
-  #guide-window button.guide-card {
-    appearance: none;
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 10px;
-    padding: 10px;
-    background: rgba(250, 250, 250, 0.95);
-    min-height: 62px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 6px;
-    text-align: left;
-    cursor: pointer;
-  }
-  #guide-window button.guide-card:active {
-    transform: translateY(1px);
-  }
-  #guide-window button.guide-card:focus-visible {
-    outline: 2px solid rgba(0, 0, 0, 0.5);
-    outline-offset: 2px;
-  }
-  #guide-window .guide-card .guide-name {
-    font-size: 12px;
-    font-weight: 700;
-  }
-  #guide-window .guide-card .guide-preview {
-    width: 100%;
-    height: 40px;
-    border-radius: 6px;
-    background: linear-gradient(180deg, rgba(235, 242, 255, 0.9), rgba(245, 250, 255, 0.9));
-    border: 1px solid rgba(120, 150, 190, 0.2);
-    overflow: hidden;
-  }
-  #guide-window .guide-card .guide-preview svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-  #guide-window .guide-card .guide-preview path {
-    fill: none;
-    stroke: #2f5fae;
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  #guide-window .guide-card .guide-meta {
-    font-size: 10px;
-    color: #777;
-  }
-  .operation-content h1 {
-    margin-top: 0;
-    margin-bottom: 10px;
-    font-size: 28px;
-    letter-spacing: 0.02em;
-  }
-  .operation-content > p {
-    color: var(--text-sub);
-  }
-  .operation-note {
-    margin-top: 14px;
-    font-size: 13px;
-    opacity: 0.9;
-    color: var(--text-sub);
-  }
-  .mode-video-guide {
-    margin: 14px 0 20px;
-    padding: 12px;
-    border: 1px solid rgba(90, 120, 170, 0.26);
-    border-radius: 10px;
-    background: rgba(235, 244, 255, 0.6);
-  }
-  .mode-video-guide h3 {
-    margin: 0 0 10px 0;
-    font-size: 16px;
-  }
-  .mode-video-headings {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-  .mode-video-heading {
-    border: 1px solid #9cb4d3;
-    background: #f3f8ff;
-    color: #1f3350;
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .mode-video-heading.is-active {
-    background: #2f7fff;
-    border-color: #2f7fff;
-    color: #fff;
-  }
-  #mode-video-player {
-    width: 100%;
-    max-width: 960px;
-    border-radius: 10px;
-    background: #000;
-  }
-  #mode-video-status {
-    margin: 6px 0 0;
-    font-size: 12px;
-    color: #445c7a;
-  }
-
-  @media (max-width: 900px) {
-    .glass-panel {
-      width: calc(100vw - 24px);
-      padding: 16px;
-      border-radius: 14px;
+    .terminal-status .status-board {
+      min-height: 100%;
     }
-    .section {
-      min-height: auto;
-      padding-top: 12px;
+    .status-callout {
+      margin: 14px 0 0;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px dashed rgba(143, 221, 255, 0.32);
+      background: rgba(7, 18, 36, 0.48);
+      color: #c9def2;
+      font-size: 12px;
+      line-height: 1.6;
     }
-    #intro-wrapper {
-      min-height: 300px;
-      flex-basis: 100%;
+    .terminal-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
     }
-    #UiGroup {
-      height: 420px;
+    .route-card,
+    .flow-card,
+    .spec-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      backdrop-filter: blur(8px);
+      box-shadow: var(--shadow);
     }
-    #show-instructions-btn {
-      right: 10px;
-      bottom: 12px;
-      top: auto;
+    .route-card {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      text-decoration: none;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
     }
-    .log-control-square-button {
-      width: min(88vw, 640px);
-      height: min(34vh, 300px);
+    .route-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(141, 220, 255, 0.56);
+      background: rgba(10, 22, 41, 0.84);
     }
-    #save-buttons {
-      max-width: calc(100vw - 24px);
-      flex-wrap: wrap !important;
-      row-gap: 6px;
+    .route-card[data-tone="view"] {
+      border-color: rgba(116, 225, 189, 0.3);
     }
-    #save-buttons .control-square-button {
-      min-width: 94px;
-      height: 36px;
-      font-size: 12px !important;
-      padding: 8px !important;
+    .route-card[data-tone="edit"] {
+      border-color: rgba(255, 211, 77, 0.34);
     }
-    #map-load-status {
-      top: 96px;
-      max-width: calc(100vw - 24px);
-      font-size: 10px;
+    .route-card[data-tone="asset"] {
+      border-color: rgba(132, 188, 255, 0.3);
     }
-    #create-mode-utility-buttons {
-      top: 12px;
-      left: 12px;
-      right: 12px;
-      gap: 8px;
-      flex-wrap: wrap;
+    .route-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: #9bc8ef;
+      font-size: 11px;
+      letter-spacing: 0.08em;
     }
-    #create-mode-utility-buttons > button,
-    #save-buttons .control-square-button,
-    #scene-toggle-btn,
-    #performance-toggle-btn,
-    #demo-play-btn,
-    #show-instructions-btn,
-    #logwindow {
-      min-height: 44px;
-      font-size: 14px !important;
-      touch-action: manipulation;
-    }
-    #toggle-train-panel,
-    #toggle-ground-opacity,
-    #undo-action,
-    #redo-action {
-      min-width: 44px;
-    }
-    #logwindow {
-      position: fixed !important;
-      left: 12px !important;
-      right: 12px !important;
-      top: auto !important;
-      bottom: 196px !important;
-      width: auto !important;
-      max-width: none !important;
-    }
-    #instructions-panel,
-    #rotation-panel,
-    #difference-panel,
-    #construction-category-panel,
-    #rail-construction-panel,
-    #structure-generation-list-panel,
-    #group-mode-panel,
-    #group-point-edit-mode-panel,
-    #train-panel,
-    #guide-window,
-    #scene-panel,
-    #performance-panel {
-      left: 12px !important;
-      right: 12px !important;
-      width: auto !important;
-      max-width: none !important;
-      box-sizing: border-box;
-    }
-    #rotation-panel,
-    #difference-panel,
-    #construction-category-panel,
-    #rail-construction-panel,
-    #structure-generation-list-panel,
-    #group-mode-panel,
-    #group-point-edit-mode-panel,
-    #train-panel {
-      top: 126px !important;
-      max-height: calc(100vh - 150px);
-      overflow: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    #guide-window,
-    #scene-panel,
-    #performance-panel {
-      bottom: 68px !important;
-      max-height: calc(100vh - 140px);
-      overflow: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    #rotation-panel input,
-    #rotation-panel select,
-    #rotation-panel button,
-    #difference-panel select,
-    #difference-panel button,
-    #construction-category-panel button,
-    #construction-category-panel input,
-    #construction-category-panel select,
-    #rail-construction-panel button,
-    #rail-construction-panel input,
-    #rail-construction-panel select,
-    #structure-generation-list-panel button,
-    #group-mode-panel button,
-    #group-mode-panel select,
-    #group-point-edit-mode-panel button,
-    #train-panel button,
-    #train-panel input,
-    #train-panel select,
-    #guide-window button,
-    #scene-panel button,
-    #scene-panel select,
-    #performance-panel button,
-    #performance-panel select,
-    #performance-panel input {
-      min-height: 44px;
-      font-size: 16px !important;
-      touch-action: manipulation;
-    }
-    #rotation-panel label,
-    #difference-panel label,
-    #construction-category-panel label,
-    #rail-construction-panel label,
-    #group-mode-panel label,
-    #train-panel label,
-    #guide-window .guide-sub,
-    #scene-panel span,
-    #performance-panel label {
-      font-size: 13px !important;
-    }
-    #rotation-panel .panel-axis-row {
-      gap: 6px;
-    }
-    #rotation-panel .panel-axis-tool {
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
-    }
-    #difference-unify-button,
-    #rail-construction-snap-pins-button,
-    #rail-construction-generate-button,
-    #construction-generate-button,
-    #group-mode-create-button,
-    #group-mode-append-button,
-    #group-mode-arrange-button,
-    #train-add-button,
-    #train-apply-button {
-      padding: 10px 12px;
-    }
-    #difference-panel .difference-title,
-    #construction-category-panel .construction-title,
-    #rail-construction-panel .rail-construction-title,
-    #structure-generation-list-panel .structure-generation-list-title,
-    #group-mode-panel .group-mode-title,
-    #guide-window .guide-title {
-      font-size: 14px;
-    }
-    #construction-category-panel .construction-grid,
-    #rail-construction-panel .rail-construction-grid,
-    #guide-window .guide-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    #construction-category-panel .construction-card,
-    #rail-construction-panel .rail-construction-card,
-    #guide-window .guide-card {
-      min-height: 96px;
-      padding: 10px;
-    }
-    #construction-category-panel .construction-card span,
-    #rail-construction-panel .rail-construction-card span,
-    #guide-window .guide-card .guide-name,
-    #guide-window .guide-card .guide-meta {
+    .route-topline strong {
+      color: #f4f8ff;
       font-size: 12px;
     }
-  }
-
-</style>
-  
-
-  <!-- Welcome overlay with a scaled-down canvas preview -->
-  <section id="welcome" class="section">
-      <div class="welcome-content glass-panel">
-      <div class="led-marquee" aria-label="announcement">
-
-        <div class="led-marquee__inner" id="led-marquee-inner">
-          <div class="led-row" data-row="0"><span class="led-marquee__text"></span></div>
-          <div class="led-row" data-row="1"><span class="led-marquee__text"></span></div>
-          <div class="led-row" data-row="2"><span class="led-marquee__text"></span></div>
-        </div>
-
-      </div>
-      <div class="intro-layout">
-        <div id="intro-wrapper">
-          <canvas id="three-canvas"></canvas>
-          <!-- three-ui: プレビュー時はここにボタン群を表示 -->
-          <div id="three-ui">
-            <div class="canvas-ui">
-              <button id="speed-up" class="control-button" style="right: 20px; bottom: 200px;">◀︎◁</button>
-              <button id="speed-down" class="control-button" style="right: 95px; bottom: 200px;">▶︎▷</button>
-              <button id="btn-up" class="control-button" style="right: 160px; bottom: 150px;">🔺</button>
-              <button id="btn-down" class="control-button" style="right: 160px; bottom: 70px;">🔻</button>
-
-              <button id="controller-area" class="circle-ctrl-area" style="left: 160px; bottom: 60px; width: 80px; height: 80px"></button>
-              <button id="controller" class="circle-ctrl" style="left: 160px; bottom: 110px; width: 30px; height: 30px"></button>
-
-              <button id="log" class="control-button" style="right: 20px; top: 40px; display: none;">📤</button>
-              <button id="create-guide-y-button" class="control-button" style="position: fixed; left: 124px; top: 84px; width: 42px; height: 42px; border-radius: 4px; font-size: 19px; line-height: 1; z-index: 140; display: none;">y</button>
-
-              <div id="UiGroup" style="position: fixed; top: 0px; left: 20px; z-index: 100;">
-                <button id = 'see' style = 'top: 10px;' > 🎦 </button>
-                <button id = 'edit' style = 'top: 40px;' > 🛠️ </button>
-                <button id = 'rail' style = 'top: 70px; left:10px;' > 🛤️ </button>
-                <button id = 'new' style = 'top: 100px; left:20px;' > + </button>
-                <button id = 'move' style = 'top: 130px; left:20px;' > 💫 </button>
-                <button id = 'x_z' style = 'top: 160px; left:30px;' > ⤮ </button>
-                <button id = 'y' style = 'top: 190px; left:30px;' > ⇡ </button>
-                <button id = 'structure' style = 'top: 130px; left:80px;' > 🌉</button>
-                <button id = 'new/2' style = 'top: 160px; left:90px;' > + </button>
-                <button id = 'construction' style = 'top: 190px; left:90px;' > 🏗️ </button>
-
-              </div>
-              <button id="difference-body-select" class="control-square-button" style="position: fixed; left: 20px; top: 104px; z-index: 120; padding: 6px 10px; font-size: 12px; display: none;">body</button>
-              <button id="difference-move-xz" class="control-square-button" style="position: fixed; left: 76px; top: 104px; z-index: 120; padding: 6px 10px; font-size: 12px; display: none;">x_z_sf</button>
-              <button id="difference-move-y" class="control-square-button" style="position: fixed; left: 146px; top: 104px; z-index: 120; padding: 6px 10px; font-size: 12px; display: none;">y_sf</button>
-              <button id="difference-auto-merge-toggle" class="control-square-button" style="position: fixed; left: 206px; top: 104px; z-index: 120; padding: 6px 10px; font-size: 12px; display: none;">join[on]</button>
-
-              <!-- ランダム立体交差ボタンは非表示に変更 -->
-
-              <div id="frontViewButtons" style="display: none; position: fixed; top: 20px; right: 20px; z-index: 100;"></div>
-
-              <div id="create-mode-utility-buttons">
-                <button id="toggle-daynight" style="z-index: 10; padding: 10px 15px; font-size: 16px; border-radius: 8px;">🌙 夜にする</button>
-                <button id="toggle-train-panel" class="control-square-button" style="z-index: 10; padding: 10px 12px; font-size: 18px; backdrop-filter: blur(4px);" title="列車設定">🚆</button>
-                <button id="toggle-ground-opacity" class="control-square-button" style="z-index: 10; padding: 10px 12px; font-size: 14px; backdrop-filter: blur(4px);">ground透過</button>
-              </div>
-
-              <div id="save-buttons" style="z-index: 10;">
-                <button id="undo-action" class="control-square-button" title="元に戻す (Ctrl/Cmd+Z)" disabled>↩︎</button>
-                <button id="redo-action" class="control-square-button" title="やり直し (Ctrl/Cmd+Shift+Z)" disabled>↪︎</button>
-                <button id="save-world-data" class="control-square-button">ワールド保存</button>
-              </div>
-              <div id="map-load-status" aria-live="polite">map_data: 未実行</div>
-
-              <button id = "logwindow" class="log-control-square-button" style="position: absolute; left: 420px; top: 20px; padding: 10px; font-size: 14px; color: #000; z-index: 10; backdrop-filter: blur(4px);">モバイル出力用</button>
-              
-              <button id="show-instructions-btn">操作説明</button>
-              <button id="demo-play-btn" type="button" aria-label="デモを再生" style="position: fixed; right: 14px; bottom: 110px; z-index: 2700; border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; background: rgba(11,17,29,0.84); color: #f4f7fb; padding: 10px 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; backdrop-filter: blur(10px); box-shadow: 0 12px 30px rgba(0,0,0,0.24); cursor: pointer; display: none;">デモ再生</button>
-              <button id="scene-toggle-btn" type="button" aria-expanded="false" style="position: fixed; right: 14px; bottom: 62px; z-index: 2700; border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; background: rgba(11,17,29,0.84); color: #f4f7fb; padding: 10px 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; backdrop-filter: blur(10px); box-shadow: 0 12px 30px rgba(0,0,0,0.24); cursor: pointer;">シーン</button>
-              <section id="scene-panel" style="position: fixed; right: 14px; bottom: 110px; z-index: 2700; width: 220px; padding: 14px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.18); background: rgba(7,12,20,0.9); color: #f5f7fb; box-shadow: 0 18px 36px rgba(0,0,0,0.28); backdrop-filter: blur(14px); display: none; font-size: 13px; line-height: 1.45;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-                  <strong style="font-size:13px;letter-spacing:0.04em;">シーン</strong>
-                  <button type="button" id="scene-panel-close" style="border:none;background:transparent;color:#d5dbe7;font-size:18px;line-height:1;cursor:pointer;">×</button>
-                </div>
-                <div style="display:grid;gap:10px;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                    <span style="color:#b7c3d9;">電車</span>
-                    <button type="button" id="scene-toggle-trains-btn" aria-pressed="true" style="min-width:58px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#f5f7fb;font-size:12px;font-weight:700;letter-spacing:0.04em;cursor:pointer;">ON</button>
-                  </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                    <span style="color:#b7c3d9;">都市モデル</span>
-                    <button type="button" id="scene-toggle-city-btn" aria-pressed="true" style="min-width:58px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#f5f7fb;font-size:12px;font-weight:700;letter-spacing:0.04em;cursor:pointer;">ON</button>
-                  </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                    <span style="color:#b7c3d9;">line重なり</span>
-                    <button type="button" id="scene-toggle-line-overlap-preview-btn" aria-pressed="true" style="min-width:58px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#f5f7fb;font-size:12px;font-weight:700;letter-spacing:0.04em;cursor:pointer;">ON</button>
-                  </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                    <span style="color:#b7c3d9;">列車進行</span>
-                    <button type="button" id="scene-toggle-train-motion-btn" aria-pressed="true" style="min-width:58px;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#f5f7fb;font-size:12px;font-weight:700;letter-spacing:0.04em;cursor:pointer;">ON</button>
-                  </div>
-                </div>
-              </section>
-              <button id="performance-toggle-btn" type="button" aria-expanded="false" style="position: fixed; right: 14px; bottom: 14px; z-index: 2700; border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; background: rgba(11,17,29,0.84); color: #f4f7fb; padding: 10px 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; backdrop-filter: blur(10px); box-shadow: 0 12px 30px rgba(0,0,0,0.24); cursor: pointer;">Performance</button>
-              <section id="performance-panel" style="position: fixed; right: 14px; bottom: 110px; z-index: 2700; width: 220px; padding: 14px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.18); background: rgba(7,12,20,0.9); color: #f5f7fb; box-shadow: 0 18px 36px rgba(0,0,0,0.28); backdrop-filter: blur(14px); display: none; font-size: 13px; line-height: 1.45;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-                  <strong style="font-size:13px;letter-spacing:0.04em;">Performance</strong>
-                  <button type="button" id="performance-panel-close" style="border:none;background:transparent;color:#d5dbe7;font-size:18px;line-height:1;cursor:pointer;">×</button>
-                </div>
-                <label for="performance-quality-select" style="display:block;margin-bottom:6px;color:#b7c3d9;">画質</label>
-                <select id="performance-quality-select" style="width:100%;margin-bottom:12px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#f5f7fb;">
-                  <option value="low">低</option>
-                  <option value="medium">標準</option>
-                  <option value="high">高</option>
-                </select>
-                <label for="performance-distance-range" style="display:block;margin-bottom:6px;color:#b7c3d9;">描画距離</label>
-                <input id="performance-distance-range" type="range" min="50" max="600" step="10" style="width:100%;margin-bottom:6px;" />
-                <div id="performance-distance-value" style="color:#f5f7fb;font-variant-numeric:tabular-nums;">200</div>
-              </section>
-
-              <div id="instructions-panel" role="region" aria-label="操作説明">
-                <h3 style="margin-top:0;">操作説明</h3>
-                <ul>
-                  [視点] 画面上をスライド/ドラッグで視点を回転・移動します。<br>
-                  [移動] 左下のコントローラ 又は A.S.D.W キーで 前後左右に移動できます。<br>
-                  [表示切替] 右上のボタンで列車ビュー等を切替えます。<br>
-                  [フルスクリーン] 「表示を開始する」でフルスクリーン表示に切替、再度「操作説明」を閉じてプレビューに戻せます。
-                </ul>
-                <p style="margin-bottom:0;">※ モバイルでは画面を長押しするとズームします。</p>
-              </div>
-
-              <div id="rotation-panel" role="region" aria-label="回転パネル" style="position: fixed; right: 20px; top: 120px; width: 220px; padding: 12px; background: rgba(255,255,255,0.92); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 10002; display: none; pointer-events: auto;">
-                <div id="rotation-panel-title" style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">Rotation</div>
-                <div id="move-point-coordinate-mode" style="display:none; margin-bottom:8px;">
-                  <div style="font-size:10px; color:#2a3442; margin-bottom:4px;">Coordinate</div>
-                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                    <button id="move-point-coordinate-world" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #9eb7db; background:#eaf2ff; color:#1f3658; border-radius:6px;">World</button>
-                    <button id="move-point-coordinate-grid" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #b8d7c0; background:#eefcf3; color:#1d5a33; border-radius:6px;">Grid</button>
-                  </div>
-                </div>
-                <div id="copy-target-mode" style="display:none; margin-bottom:8px;">
-                  <div style="font-size:10px; color:#2a3442; margin-bottom:4px;">Copy Target</div>
-                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                    <button id="copy-target-individual" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #c8cfd9; background:#f4f7fb; color:#2e3f58; border-radius:6px;">Individual</button>
-                    <button id="copy-target-group" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #b9d5ff; background:#eaf2ff; color:#1f3658; border-radius:6px;">Group</button>
-                  </div>
-                </div>
-                <div id="move-point-axis-legend" style="display:none; margin-bottom:8px; font-size:10px; color:#243247;">
-                  <div style="display:flex; align-items:center; gap:6px; margin:2px 0;"><span style="display:inline-block; width:18px; height:2px; background:#e34c4c;"></span><span>X</span></div>
-                  <div style="display:flex; align-items:center; gap:6px; margin:2px 0;"><span style="display:inline-block; width:18px; height:2px; background:#46b86a;"></span><span>Y</span></div>
-                  <div style="display:flex; align-items:center; gap:6px; margin:2px 0;"><span style="display:inline-block; width:18px; height:2px; background:#3f7fd6;"></span><span>Y2</span></div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr; gap: 6px;">
-                  <label id="rotation-label-set-y" style="font-size: 11px; color: #b08a22; display: none;">Set Y (deg)
-                    <div class="panel-axis-row">
-                    <div class="panel-input-wrap">
-                      <span id="rotation-input-set-y-mask" class="panel-input-mask"></span>
-                      <span id="rotation-input-set-y-ghost" class="panel-input-ghost">0</span>
-                      <input id="rotation-input-set-y" type="text" inputmode="decimal" placeholder="0" style="width: 100%; color: #b08a22; border: 1px solid #e8d499;">
-                    </div>
-                    </div>
-                  </label>
-                  <label id="rotation-label-set-x" style="font-size: 11px; color: #cf6f28; display: none;">Set X (deg)
-                    <div class="panel-axis-row">
-                    <div class="panel-input-wrap">
-                      <span id="rotation-input-set-x-mask" class="panel-input-mask"></span>
-                      <span id="rotation-input-set-x-ghost" class="panel-input-ghost">0</span>
-                      <input id="rotation-input-set-x" type="text" inputmode="decimal" placeholder="0" style="width: 100%; color: #cf6f28; border: 1px solid #ebc19d;">
-                    </div>
-                    </div>
-                  </label>
-                  <label id="rotation-label-x" style="font-size: 11px; color: #b23b3b;">X (deg)
-                    <div class="panel-axis-row">
-                    <div class="panel-input-wrap">
-                      <span id="rotation-input-x-mask" class="panel-input-mask"></span>
-                      <span id="rotation-input-x-ghost" class="panel-input-ghost">0</span>
-                      <input id="rotation-input-x" type="text" inputmode="decimal" placeholder="0" style="width: 100%; color: #b23b3b; border: 1px solid #e3b5b5;">
-                    </div>
-                    <button id="move-point-axis-ref-x" class="panel-axis-tool panel-axis-pick" type="button" title="X参照先を選択">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 4l6 6"></path>
-                        <path d="M7 17L3 21l4-1 9-9-3-3-6 6z"></path>
-                      </svg>
-                    </button>
-                    <button id="move-point-axis-lock-x" class="panel-axis-tool panel-axis-lock" type="button" title="X固定切替">🔓</button>
-                    <button id="move-point-axis-unlink-x" class="panel-axis-tool panel-axis-unlink" type="button" title="X参照解除">x</button>
-                    </div>
-                  </label>
-                  <label id="rotation-label-y" style="font-size: 11px; color: #2f8f57;">Y (deg)
-                    <div class="panel-axis-row">
-                    <div class="panel-input-wrap">
-                      <span id="rotation-input-y-mask" class="panel-input-mask"></span>
-                      <span id="rotation-input-y-ghost" class="panel-input-ghost">0</span>
-                      <input id="rotation-input-y" type="text" inputmode="decimal" placeholder="0" style="width: 100%; color: #2f8f57; border: 1px solid #bfe3c9;">
-                    </div>
-                    <button id="move-point-axis-ref-y" class="panel-axis-tool panel-axis-pick" type="button" title="Y参照先を選択">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 4l6 6"></path>
-                        <path d="M7 17L3 21l4-1 9-9-3-3-6 6z"></path>
-                      </svg>
-                    </button>
-                    <button id="move-point-axis-lock-y" class="panel-axis-tool panel-axis-lock" type="button" title="Y固定切替">🔓</button>
-                    <button id="move-point-axis-unlink-y" class="panel-axis-tool panel-axis-unlink" type="button" title="Y参照解除">x</button>
-                    </div>
-                  </label>
-                  <label id="rotation-label-z" style="font-size: 11px; color: #2f6fb8;">Z (deg)
-                    <div class="panel-axis-row">
-                    <div class="panel-input-wrap">
-                      <span id="rotation-input-z-mask" class="panel-input-mask"></span>
-                      <span id="rotation-input-z-ghost" class="panel-input-ghost">0</span>
-                      <input id="rotation-input-z" type="text" inputmode="decimal" placeholder="0" style="width: 100%; color: #2f6fb8; border: 1px solid #bcd5ee;">
-                    </div>
-                    <button id="move-point-axis-ref-z" class="panel-axis-tool panel-axis-pick" type="button" title="Z参照先を選択">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 4l6 6"></path>
-                        <path d="M7 17L3 21l4-1 9-9-3-3-6 6z"></path>
-                      </svg>
-                    </button>
-                    <button id="move-point-axis-lock-z" class="panel-axis-tool panel-axis-lock" type="button" title="Z固定切替">🔓</button>
-                    <button id="move-point-axis-unlink-z" class="panel-axis-tool panel-axis-unlink" type="button" title="Z参照解除">x</button>
-                    </div>
-                  </label>
-                </div>
-                <button id="rotation-apply" style="margin-top: 8px; width: 100%; padding: 6px 8px;">適用</button>
-                <button id="rotation-decoration-zero-base" type="button" style="margin-top: 8px; width: 100%; padding: 6px 8px; display: none;">現在姿勢を0度基準にする</button>
-                <button id="difference-unify-button" type="button" style="margin-top: 8px; width: 100%; padding: 6px 8px; display: none;">高品質一体化</button>
-                <pre id="rotation-selection-info" style="margin-top: 8px; max-height: 180px; overflow: auto; padding: 6px; border-radius: 6px; background: rgba(14,20,30,0.78); color: #eef4ff; border: 1px solid rgba(150,180,230,0.3); font-size: 10px; line-height: 1.45; white-space: pre-wrap;">選択点: 2点以上で情報を表示</pre>
-              </div>
-
-              <div id="group-point-edit-mode-panel" role="region" aria-label="グループ編集モード" style="position: fixed; right: 20px; bottom: 20px; width: 250px; padding: 12px; background: rgba(255,255,255,0.92); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.22); z-index: 10002; display: none; pointer-events: auto;">
-                <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: #223448;">グループ編集</div>
-                <div class="group-point-edit-row" style="margin-bottom: 8px;">
-                  <div class="group-point-edit-label">通常グループ</div>
-                  <button id="normal-group-point-group" type="button" class="group-point-edit-btn">グループ</button>
-                  <button id="normal-group-point-partial" type="button" class="group-point-edit-btn">部分</button>
-                </div>
-                <div class="group-point-edit-row">
-                  <div class="group-point-edit-label">複製グループ</div>
-                  <button id="copied-group-point-group" type="button" class="group-point-edit-btn">グループ</button>
-                  <button id="copied-group-point-detach" type="button" class="group-point-edit-btn">独立</button>
-                </div>
-                <div class="group-point-edit-caption">通常グループの「部分」は何も追加処理をせず、そのまま編集します。複製グループの「独立」は確認ウィンドウなしで独立化します。</div>
-              </div>
-
-              <div id="construction-category-panel" role="region" aria-label="construction カテゴリ">
-                <div class="construction-title">Construction Category</div>
-                <div class="construction-grid">
-                  <button class="construction-card is-selected" data-construction-profile="round" type="button" aria-pressed="true">
-                    <img alt="丸鋼" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Ccircle cx='60' cy='36' r='20' fill='%23a3b4cf' stroke='%235a6f95' stroke-width='6'/%3E%3C/svg%3E">
-                    <span>丸鋼</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="h_beam" type="button" aria-pressed="false">
-                    <img alt="H形鋼" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='20' y='14' width='80' height='12' fill='%23859bb8'/%3E%3Crect x='53' y='14' width='14' height='44' fill='%23859bb8'/%3E%3Crect x='20' y='46' width='80' height='12' fill='%23859bb8'/%3E%3C/svg%3E">
-                    <span>H形鋼</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="t_beam" type="button" aria-pressed="false">
-                    <img alt="T形鋼" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='18' y='14' width='84' height='12' fill='%23859bb8'/%3E%3Crect x='53' y='26' width='14' height='32' fill='%23859bb8'/%3E%3C/svg%3E">
-                    <span>T形鋼</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="l_beam" type="button" aria-pressed="false">
-                    <img alt="L形鋼" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='22' y='14' width='14' height='44' fill='%23859bb8'/%3E%3Crect x='22' y='46' width='76' height='12' fill='%23859bb8'/%3E%3C/svg%3E">
-                    <span>L形鋼</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="rect_bar" type="button" aria-pressed="false">
-                    <img alt="角柱" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='22' y='18' width='76' height='36' rx='4' fill='%23859bb8' stroke='%235a6f95' stroke-width='4'/%3E%3C/svg%3E">
-                    <span>角柱</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="truss" type="button" aria-pressed="false">
-                    <img alt="トラス柱" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='36' y1='12' x2='36' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='84' y1='12' x2='84' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='36' y1='12' x2='84' y2='12' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='36' y1='60' x2='84' y2='60' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='36' y1='12' x2='84' y2='28' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='84' y1='28' x2='36' y2='44' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='36' y1='44' x2='84' y2='60' stroke='%23859bb8' stroke-width='4'/%3E%3C/svg%3E">
-                    <span>トラス</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="corrugated_bar" type="button" aria-pressed="false">
-                    <img alt="波板柱" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M10 44 L18 28 L26 44 L34 28 L42 44 L50 28 L58 44 L66 28 L74 44 L82 28 L90 44 L98 28 L106 44' fill='none' stroke='%235a6f95' stroke-width='5' stroke-linejoin='round'/%3E%3Cpath d='M10 52 L18 36 L26 52 L34 36 L42 52 L50 36 L58 52 L66 36 L74 52 L82 36 L90 52 L98 36 L106 52' fill='none' stroke='%23859bb8' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E">
-                    <span>波板柱</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="tubular" type="button" aria-pressed="false">
-                    <img alt="ライト管" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='14' y='28' width='92' height='16' rx='8' fill='%23f8fbff' stroke='%239bb8d6' stroke-width='4'/%3E%3Crect x='96' y='26' width='10' height='20' fill='%23d9ebff'/%3E%3C/svg%3E">
-                    <span>ライト管</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="tube" type="button" aria-pressed="false">
-                    <img alt="補間チューブ" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M8 44 C26 18, 44 58, 62 32 C78 10, 96 48, 112 24' fill='none' stroke='%2388a4c2' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M8 44 C26 18, 44 58, 62 32 C78 10, 96 48, 112 24' fill='none' stroke='%23dfeaf7' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
-                    <span>補間チューブ</span>
-                  </button>
-                  <button class="construction-card" data-construction-profile="panel_wall" type="button" aria-pressed="false">
-                    <img alt="仮囲い壁" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23f9fbff'/%3E%3Cstop offset='100%25' stop-color='%23e9eef4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='15' y='10' width='90' height='52' rx='3' fill='url(%23g)' stroke='%23c8d3df' stroke-width='2'/%3E%3Cline x1='15' y1='23' x2='105' y2='23' stroke='%23d7e0e8'/%3E%3Cline x1='15' y1='36' x2='105' y2='36' stroke='%23d7e0e8'/%3E%3Cline x1='15' y1='49' x2='105' y2='49' stroke='%23d7e0e8'/%3E%3C/svg%3E">
-                    <span>仮囲い壁</span>
-                  </button>
-                </div>
-                <div id="construction-pattern-row" class="construction-pattern-row">
-                  <div class="construction-pattern-label">Truss Pattern</div>
-                  <div class="construction-pattern-grid">
-                    <button class="construction-pattern-card" data-construction-pattern="truss_column" type="button" aria-pressed="false">
-                      <img alt="標準トラス" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='30' y1='12' x2='30' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='90' y1='12' x2='90' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='30' y1='12' x2='90' y2='12' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='30' y1='60' x2='90' y2='60' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='30' y1='12' x2='90' y2='36' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='30' y1='36' x2='90' y2='60' stroke='%23859bb8' stroke-width='4'/%3E%3C/svg%3E">
-                      <span>標準</span>
-                    </button>
-                    <button class="construction-pattern-card" data-construction-pattern="truss_ladder" type="button" aria-pressed="false">
-                      <img alt="はしご型トラス" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='34' y1='12' x2='34' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='86' y1='12' x2='86' y2='60' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='34' y1='12' x2='86' y2='12' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='34' y1='28' x2='86' y2='28' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='34' y1='44' x2='86' y2='44' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='34' y1='60' x2='86' y2='60' stroke='%23859bb8' stroke-width='4'/%3E%3C/svg%3E">
-                      <span>はしご型</span>
-                    </button>
-                    <button class="construction-pattern-card" data-construction-pattern="truss_catenary" type="button" aria-pressed="false">
-                      <img alt="架線柱型トラス" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='40' y1='10' x2='40' y2='62' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='80' y1='10' x2='80' y2='62' stroke='%235a6f95' stroke-width='5'/%3E%3Cline x1='40' y1='18' x2='80' y2='18' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='40' y1='34' x2='80' y2='34' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='40' y1='50' x2='80' y2='50' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='40' y1='18' x2='80' y2='34' stroke='%23859bb8' stroke-width='4'/%3E%3Cline x1='80' y1='34' x2='40' y2='50' stroke='%23859bb8' stroke-width='4'/%3E%3C/svg%3E">
-                      <span>架線柱型</span>
-                    </button>
-                  </div>
-                </div>
-                <button id="construction-generate-button" type="button">選択カテゴリで生成</button>
-                <p id="construction-category-status">カテゴリを選択し、点を2つ以上選択して生成します。</p>
-              </div>
-
-              <div id="rail-construction-panel" role="region" aria-label="rail construction カテゴリ">
-                <div class="rail-construction-title">Rail Construction Category</div>
-                <div class="rail-construction-grid">
-                  <button class="rail-construction-card is-selected" data-rail-construction-category="bridge" type="button" aria-pressed="true">
-                    <img alt="bridge" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M10 46 L110 46' stroke='%234b6584' stroke-width='6'/%3E%3Cpath d='M20 46 C40 20, 80 20, 100 46' fill='none' stroke='%23618ad1' stroke-width='6'/%3E%3C/svg%3E">
-                    <span>bridge</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="elevated" type="button" aria-pressed="false">
-                    <img alt="elevated" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='14' y='18' width='92' height='10' fill='%235d7ea8'/%3E%3Crect x='22' y='28' width='10' height='24' fill='%2388a6c9'/%3E%3Crect x='88' y='28' width='10' height='24' fill='%2388a6c9'/%3E%3C/svg%3E">
-                    <span>elevated</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="wall" type="button" aria-pressed="false">
-                    <img alt="wall" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='20' y='16' width='80' height='40' fill='%238ca9c9'/%3E%3Cline x1='20' y1='30' x2='100' y2='30' stroke='%236783a7'/%3E%3Cline x1='20' y1='44' x2='100' y2='44' stroke='%236783a7'/%3E%3C/svg%3E">
-                    <span>wall</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="floor" type="button" aria-pressed="false">
-                    <img alt="floor" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpolygon points='16,42 60,22 104,42 60,58' fill='%2388a7cb'/%3E%3C/svg%3E">
-                    <span>floor</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="pillar" type="button" aria-pressed="false">
-                    <img alt="pillar" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='52' y='16' width='16' height='40' fill='%237f9ec1'/%3E%3Crect x='46' y='12' width='28' height='6' fill='%236884a8'/%3E%3Crect x='46' y='56' width='28' height='6' fill='%236884a8'/%3E%3C/svg%3E">
-                    <span>pillar</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="catenary_pole" type="button" aria-pressed="false">
-                    <img alt="catenary_pole" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='20' y1='52' x2='100' y2='52' stroke='%23506c8e' stroke-width='5'/%3E%3Crect x='32' y='16' width='8' height='36' fill='%236f8fb3'/%3E%3Crect x='80' y='16' width='8' height='36' fill='%236f8fb3'/%3E%3Cline x1='36' y1='20' x2='84' y2='20' stroke='%234f6e90' stroke-width='4'/%3E%3C/svg%3E">
-                    <span>catenary_pole</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="rib_bridge" type="button" aria-pressed="false">
-                    <img alt="rib_bridge" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='10' y1='46' x2='110' y2='46' stroke='%23506c8e' stroke-width='6'/%3E%3Cline x1='24' y1='46' x2='40' y2='24' stroke='%2378a6e6'/%3E%3Cline x1='48' y1='46' x2='60' y2='20' stroke='%2378a6e6'/%3E%3Cline x1='72' y1='46' x2='80' y2='24' stroke='%2378a6e6'/%3E%3Cline x1='96' y1='46' x2='100' y2='28' stroke='%2378a6e6'/%3E%3C/svg%3E">
-                    <span>rib_bridge</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="tunnel_rect" type="button" aria-pressed="false">
-                    <img alt="tunnel_rect" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M24 52 L24 20 L96 20 L96 52' fill='none' stroke='%2358789f' stroke-width='7'/%3E%3C/svg%3E">
-                    <span>tunnel_rect</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="tunnel_circle" type="button" aria-pressed="false">
-                    <img alt="tunnel_circle" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M24 52 A36 36 0 0 1 96 52' fill='none' stroke='%2358789f' stroke-width='7'/%3E%3C/svg%3E">
-                    <span>tunnel_circle</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="platform" type="button" aria-pressed="false">
-                    <img alt="platform" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cline x1='12' y1='24' x2='108' y2='24' stroke='%235f7898' stroke-width='4'/%3E%3Cline x1='12' y1='52' x2='108' y2='52' stroke='%235f7898' stroke-width='4'/%3E%3Crect x='20' y='32' width='80' height='12' fill='%238a949f'/%3E%3C/svg%3E">
-                    <span>platform</span>
-                  </button>
-                  <button class="rail-construction-card" data-rail-construction-category="group" type="button" aria-pressed="false">
-                    <img alt="group" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='18' y='20' width='24' height='24' rx='4' fill='%2378a6e6'/%3E%3Crect x='48' y='14' width='24' height='24' rx='4' fill='%236a95d2'/%3E%3Crect x='78' y='26' width='24' height='24' rx='4' fill='%235b85be'/%3E%3Cline x1='42' y1='32' x2='48' y2='26' stroke='%234f6e90' stroke-width='3'/%3E%3Cline x1='72' y1='26' x2='78' y2='32' stroke='%234f6e90' stroke-width='3'/%3E%3C/svg%3E">
-                    <span>group</span>
-                  </button>
-                </div>
-                <div id="rail-construction-group-row">
-                  <label for="rail-construction-group-select">グループID</label>
-                  <select id="rail-construction-group-select"></select>
-                </div>
-                <div id="rail-construction-offset-row">
-                  <div class="offset-grid">
-                    <div>
-                      <label for="rail-construction-lateral-offset">線路からの横オフセット</label>
-                      <input id="rail-construction-lateral-offset" type="number" step="0.1" value="0">
-                    </div>
-                    <div>
-                      <label for="rail-construction-vertical-offset">上下オフセット(Y)</label>
-                      <input id="rail-construction-vertical-offset" type="number" step="0.1" value="0">
-                    </div>
-                    <div>
-                      <label for="rail-construction-yaw-offset">角度オフセット(度)</label>
-                      <input id="rail-construction-yaw-offset" type="number" step="1" value="0">
-                    </div>
-                    <div>
-                      <label for="rail-construction-spacing">間隔(最小)</label>
-                      <input id="rail-construction-spacing" type="number" step="0.1" min="0" value="0">
-                    </div>
-                  </div>
-                </div>
-                <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                  <button id="rail-construction-snap-pins-button" type="button">全ピンを軌道へ合わせる</button>
-                  <button id="rail-construction-generate-button" type="button">選択カテゴリで生成</button>
-                </div>
-                <p id="rail-construction-status">ピンを選択し、カテゴリを選んで生成します。</p>
-              </div>
-
-              <div id="structure-generation-list-panel" role="region" aria-label="ピン生成一覧">
-                <div class="structure-generation-list-title">Pin Generation List</div>
-                <p id="structure-generation-list-summary">生成履歴はありません。</p>
-                <div id="structure-generation-list">
-                  <p class="structure-generation-list-empty">ピンから生成した構造物がここに表示されます。</p>
-                </div>
-              </div>
-
-              <div id="group-mode-panel" role="region" aria-label="group mode panel">
-                <div class="group-mode-title">Group Mode</div>
-                <div class="group-mode-row">
-                  <label for="group-mode-track-select">路線</label>
-                  <select id="group-mode-track-select"></select>
-                </div>
-                <div class="group-mode-row">
-                  <label for="group-mode-id-select">既存グループID</label>
-                  <select id="group-mode-id-select"></select>
-                </div>
-                <button id="group-mode-create-button" type="button">グループ化</button>
-                <button id="group-mode-append-button" type="button">選択グループに追加</button>
-                <button id="group-mode-arrange-button" type="button">等間隔配置</button>
-                <p id="group-mode-status">構造物をクリックして選択してください。</p>
-              </div>
-
-              <div id="train-panel" role="region" aria-label="train panel" style="position: fixed; left: 20px; top: 118px; width: 300px; max-height: 72vh; overflow: auto; padding: 12px; background: rgba(255,255,255,0.92); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.25); z-index: 10002; display: none; pointer-events: auto;">
-                <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">Train Panel</div>
-                <div style="display: grid; gap: 8px;">
-                  <div id="train-config-list" style="display: grid; gap: 10px;"></div>
-                  <div style="display: flex; gap: 8px;">
-                    <button id="train-add-button" type="button" style="flex: 1;">追加</button>
-                    <button id="train-apply-button" type="button" style="flex: 1;">全適用</button>
-                  </div>
-                  <div id="train-status" style="font-size: 11px; line-height: 1.4; color: #29476b;">列車設定: 未設定</div>
-                </div>
-              </div>
-
-              <div id="guide-window" role="region" aria-label="配置ガイド">
-                <div class="guide-title">GUIDE SHELF</div>
-                <div class="guide-sub">配置する物体を並べる棚（仮）</div>
-                <div class="guide-grid">
-                  <button class="guide-card" data-guide-template="curve_s">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M4 26 C20 4, 38 4, 50 20 C62 36, 80 36, 96 14" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト A</div>
-                    <div class="guide-meta">S字軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="curve_l">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M8 30 L64 30 Q82 30, 82 12" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト B</div>
-                    <div class="guide-meta">L字軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="curve_u">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M10 10 L10 26 Q10 34, 22 34 L78 34 Q90 34, 90 26 L90 10" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト C</div>
-                    <div class="guide-meta">U字軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="curve_straight">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M6 20 L94 20" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト D</div>
-                    <div class="guide-meta">直線軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="curve_square">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M18 8 L82 8 L82 32 L18 32 Z" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト E</div>
-                    <div class="guide-meta">正方形軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="curve_circle">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <path d="M50 8 C67 8, 82 13, 82 20 C82 27, 67 32, 50 32 C33 32, 18 27, 18 20 C18 13, 33 8, 50 8 Z" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">オブジェクト F</div>
-                    <div class="guide-meta">円形軌道（仮）</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="led_board">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <rect x="8" y="7" width="84" height="26" rx="2" ry="2" fill="none" stroke="#8bb4ff" stroke-width="2" />
-                        <rect x="12" y="11" width="76" height="6" fill="#5e789b" />
-                        <rect x="12" y="20" width="76" height="4" fill="#34ff79" />
-                        <rect x="12" y="26" width="58" height="4" fill="#ff5f5f" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">電光掲示板</div>
-                    <div class="guide-meta">文字編集対応</div>
-                  </button>
-                  <button class="guide-card" data-guide-template="rect_spot_light">
-                    <div class="guide-preview" aria-hidden="true">
-                      <svg viewBox="0 0 100 40" preserveAspectRatio="none">
-                        <rect x="36" y="10" width="28" height="20" rx="2" ry="2" fill="#2d323a" stroke="#6d7684" />
-                        <rect x="39" y="16" width="22" height="10" fill="#f5fbff" />
-                        <line x1="50" y1="8" x2="50" y2="14" stroke="#7f8794" stroke-width="2" />
-                      </svg>
-                    </div>
-                    <div class="guide-name">角型ライト</div>
-                    <div class="guide-meta">クリック配置 / 回転可</div>
-                  </button>
-                </div>
-              </div>
-
-              <div id="difference-panel" role="region" aria-label="Difference設定">
-                <div class="difference-title">Difference Category</div>
-                <div class="difference-row">
-                  <label for="difference-shape">形状</label>
-                  <select id="difference-shape">
-                    <option value="tube">tube チューブ</option>
-                    <option value="box">box 長方形で接続</option>
-                  </select>
-                </div>
-                <div class="difference-row">
-                  <label for="difference-path">経路</label>
-                  <select id="difference-path">
-                    <option value="smooth">補完（smooth）</option>
-                    <option value="linear">直線（linear）</option>
-                  </select>
-                </div>
-                <div class="difference-row">
-                  <label for="difference-line">line</label>
-                  <select id="difference-line" multiple size="6">
-                    <option value="all">全路線</option>
-                  </select>
-                </div>
-                <div class="difference-row">
-                  <label for="difference-line-height">line高さ</label>
-                  <div style="display:flex; gap:6px; width:100%;">
-                    <input id="difference-line-height" type="number" min="0.2" step="0.1" value="2.8" style="flex:1;" />
-                    <button id="difference-line-height-apply" type="button" style="padding:4px 8px;">適用</button>
-                  </div>
-                </div>
-                <p id="difference-status">spaceで平面を配置すると半透明プレビューを表示します。</p>
-              </div>
-
-            </div>
-          </div>
-        </div>
-        <div class="welcome-side">
-          <div id="preview-feature" class="preview-card">
-            <h2>操作説明</h2>
-            <ul>
-                  [視点] 画面上をスライド/ドラッグで視点を回転・移動します。<br>
-                  [移動] 左下のコントローラ 又は A.S.D.W キーで 前後左右に移動できます。<br>
-                  [表示切替] 右上のボタンで列車ビュー等を切替えます。<br>
-                  [フルスクリーン] 「表示を開始する」でフルスクリーン表示に切替、再度「操作説明」を閉じてプレビューに戻せます。
-            </ul>
-            <p>※ モバイルでは画面を長押しするとズームします。</p>
-
-          </div>
-          <div id="preview-launch-card" class="preview-card">
-            <h2>プレビュー用 操作パネル</h2>
-            <p style="margin-bottom:12px;">ここからフルスクリーン表示に切替えられます。</p>
-            <div class="preview-actions">
-              <button id="preview-start">表示を開始する</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="operation" class="section">
-    <div class="operation-content glass-panel">
-      <h1>編集モードの説明</h1>
-      
-      <p>このモードでは、線路の形状の編集、構造物の配置から作成まで行えます。<br>以下は <strong>edit</strong> と <strong>creat</strong> で分けた説明です。</p>
-      <div id="mode-video-guide" class="mode-video-guide">
-        <h3>モード別デモ動画（見出しクリックで再生）</h3>
-        <div class="mode-video-headings" role="tablist" aria-label="モード動画の見出し">
-          <button class="mode-video-heading is-active" type="button" role="tab" aria-selected="true" data-video-src="videos/mode_see.mp4">see</button>
-          <button class="mode-video-heading" type="button" role="tab" aria-selected="false" data-video-src="videos/mode_edit.mp4">edit</button>
-          <button class="mode-video-heading" type="button" role="tab" aria-selected="false" data-video-src="videos/mode_rail.mp4">rail</button>
-          <button class="mode-video-heading" type="button" role="tab" aria-selected="false" data-video-src="videos/mode_creat.mp4">creat</button>
-          <button class="mode-video-heading" type="button" role="tab" aria-selected="false" data-video-src="videos/mode_custom.mp4">custom</button>
-        </div>
-        <video id="mode-video-player" controls playsinline preload="metadata"></video>
-        <p id="mode-video-status">見出しをクリックすると動画を再生します。</p>
-      </div>
-
-      <div class="edit-guide">
-        <div class="guide-block">
-          <h3>モード早見表（UIボタン別）</h3>
-          <ul>
-            <li><strong>🎦 see</strong>: 鑑賞モード。編集用の当たり判定を無効化し、表示確認に集中します。</li>
-            <li><strong>🛠️ edit</strong>: 編集モードの入口。以下の rail / creat / custom を選んで作業します。</li>
-            <li><strong>🛤️ rail</strong>: 線路編集モード。</li>
-            <li><strong>rail → new</strong>: 線路の制御点を追加します。</li>
-            <li><strong>rail → move</strong>: 線路制御点を移動します。</li>
-            <li><strong>move → x_z / y</strong>: 平面移動か高さ移動かを切り替えます。</li>
-            <li><strong>rail → structure → new</strong>: 構造物配置用のピンを追加します。</li>
-            <li><strong>rail → structure → construction</strong>: ピンから bridge / elevated / wall / floor / pillar / rib_bridge / tunnel_rect を生成します。</li>
-            <li><strong>creat → view</strong>: クリエイト対象の表示/非表示を確認します。</li>
-            <li><strong>creat → add_point</strong>: 点を追加して形状の基礎を作ります。</li>
-            <li><strong>add_point → x_z_move</strong>: 追加基準面を平面（XZ）方向に移動します。</li>
-            <li><strong>add_point → y_add</strong>: 追加基準面の高さ（Y）を調整します。</li>
-            <li><strong>add_point → template</strong>: テンプレートガイドを使って配置します。</li>
-            <li><strong>add_point → guide → add</strong>: ガイド面を追加します。</li>
-            <li><strong>add_point → guide → change_angle</strong>: 追加したガイド面の角度を調整します。</li>
-            <li><strong>creat → rotation</strong>: 選択点群をまとめて回転します（回転パネル対応）。</li>
-            <li><strong>creat → move_point</strong>: 既存点を直接移動します。</li>
-            <li><strong>move_point → x_z_sf / y_sf</strong>: 点移動の軸を切り替えます。</li>
-            <li><strong>move_point → rotation</strong>: 点ごとの回転ギズモを使って向きを編集します（回転パネル対応）。</li>
-            <li><strong>creat → construction</strong>: 点列から部材を生成します。</li>
-            <li><strong>construction → pillar → Round_bar / H_beam</strong>: 柱部材の断面種別を選択して生成します。</li>
-            <li><strong>construction → rite → tubular</strong>: チューブ部材を生成します。</li>
-            <li><strong>custom → new / move / construct</strong>: カスタム形状向けの追加・移動・構築を行います。</li>
-          </ul>
-        </div>
-
-        <div class="guide-block">
-          <h3>edit（編集）/ 軌道の編集や、橋・トンネルといった構造物の生成を簡単に行えるモード</h3>
-          <ul>
-            <li><strong>🛠️ edit</strong>: 編集モードの開始。以降のタップ/クリックは編集動作になります。</li>
-            <li><strong>🛤️ rail</strong>: 軌道編集モード。`new` で制御点追加、`move` で点移動、`x_z`/`y` で移動平面を切替。</li>
-            <li><strong>🌉 structure → new</strong>: 軌道上にピンを追加。</li>
-            <li><strong>🏗️ construction</strong>: 追加したピンを選択して bridge / elevated / wall / floor / pillar / rib_bridge を生成。</li>
-            <li><strong>軌道保存 / ピン保存</strong>: 現在の軌道・ピン配置を保存します。</li>
-          </ul>
-        </div>
-
-        <div class="guide-block">
-          <h3>creat（作成）/ 鉄骨や板材、電光掲示板などを自由に配置し、駅や構築物をモデリングするモード</h3>
-          <ul>
-            <li><strong>creat → view</strong>: クリエイト系の表示切替。</li>
-            <li><strong>creat → add_point</strong>: 点の追加モード。タップで点を生成し、軌道として結びます。</li>
-            <li><strong>add_point → x_z_move</strong>: 追加基準面を平面（XZ）方向に移動する補助モード。</li>
-            <li><strong>add_point → y_add</strong>: 高さ方向（Y）だけを移動する補助モード。</li>
-            <li><strong>add_point → template</strong>: ガイド棚を表示。S/L/U/直線のガイド軌道を配置できます。</li>
-            <li><strong>add_point → guide → add</strong>: ガイド棚を表示。S/L/U/直線のガイド軌道を配置できます。</li>
-            <li><strong>template / add のホバー</strong>: ガイド軌道にホバー中はガイド色が変化し、ピンが表示されます。</li>
-            <li><strong>add_point のガイド配置</strong>: ガイド軌道に当たっている間は、その軌道上に点を打てます。</li>
-            <li><strong>creat → construction</strong>: 追加した点を選択して `pillar` / `rite` などの部材を選択して生成。</li>
-            <li><strong>move_point</strong>: 既存の点を移動。`x_z_sf`/`y_sf` で移動平面切替。</li>
-            <li><strong>rotation</strong>: 複数点を選択すると中心にギズモ表示。リングドラッグで点の位置だけ回転。</li>
-            <li><strong>rotation panel</strong>: X/Y/Z の角度を入力して絶対角度で回転。表示は現在角度を薄く表示。</li>
-          </ul>
-        </div>
-      </div>
-
-      <p class="operation-note">ポイント: `add_point` を有効にするとガイド判定やガイドチューブが有効になります。`move` 中はガイドホバーは停止します。</p>
-      <p class="operation-note">※ モバイルではタッチ操作、デスクトップではマウスで操作できます。</p>
-    </div>
-  </section>
-  
-  <footer class="credits-footer" role="contentinfo" aria-label="出典情報">
-    <small>
-
-      (ℹ️ <a id="show-intro-link" href="https://github.com/mtur2007/java_three_3D/blob/main/README.md" target="_blank" rel="noopener noreferrer">操作方法はこちら</a>)
-      [クレジット / 
-      データ:
-      <a href="https://plateauview.mlit.go.jp/" target="_blank" rel="noopener noreferrer">PLATEAU</a>（国土交通省）|
-      ビジュアライズ: 
-      <a href="https://threejs.org/" target="_blank" rel="noopener noreferrer">
-      three.js (r0.169.0, MIT)</a> | 
-      変換: 
-      <a href="https://github.com/Project-PLATEAU/PLATEAU-GIS-Converter" target="_blank" rel="noopener noreferrer">
-      PLATEAU GIS Converter</a> ]
-    </small>
-  </footer>
-  
-  <script type="module-shim" src="js/mock_auth.js"></script>
-  <script type="module-shim" src="js/main.js"></script>
-  <script type="module-shim" src="js/demo_runner.js"></script>
-  <script type="module-shim" src="js/ui_toggle.js"></script>
-
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  const inner = document.getElementById('led-marquee-inner');
-  if (!inner) return;
-
-  // 3行セット：text と mode を行ごとに指定
-  // mode: "scroll" | "static"
-  const messageSets = [
-    [
-      { text: '</whiteようこそ — 三次元模型デモ', mode: 'static' },
-      { text: '</orangeこのサイトではthree.jsで作成した空間を表示します。', mode: 'scroll' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</whiteようこそ — 三次元模型デモ', mode: 'static' },
-      { text: '</orange模型の表示はもちろん、編集も可能です。', mode: 'scroll' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</whiteようこそ — 三次元模型デモ', mode: 'static' },
-      { text: '</orange編集については下部をご覧ください。', mode: 'scroll' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</redひかり 513', mode: 'static' },
-      { text: '</yellowのぞみ 111 ', mode: 'static' },
-      { text: '</blueたかし 657', mode: 'static' },
-    ],
-    [
-      { text: '</green　　普　通　　 15:06 郡山</orange 2', mode: 'static' },
-      { text: '</red喜多方ラーメン 15:25 郡山 1', mode: 'static' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</pink ３ </yellow 16:26 各停 新線新宿 １０両編成', mode: 'static' },
-      { text: '</pink ３ </yellow 16:27 各停 　調布　 ３２７２６８両編成', mode: 'static' },
-      { text: '', mode: 'static' },
-
-    ],
-    [
-      { text: '</orange☆日本は終了しました☆', mode: 'static' },
-      { text: '', mode: 'static' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</white local</orange 12:38 Naka-meguro </green8car', mode: 'static' },
-      { text: '</orange撃ち回り、外回り電車に遅れが出ております。', mode: 'scroll' },
-      { text: '</white local</orange 12:48 Naka-meguro </green7car', mode: 'static' },
-    ],
-    [
-      { text: '</green次は　</orangeオマエダ', mode: 'static' },
-      { text: '', mode: 'static' },
-      { text: '', mode: 'static' },
-    ],
-    [
-      { text: '</green　　普　通　　21:01 豊　橋 4両', mode: 'static', theme: 'green' },
-      { text: '</orangeお客様には大変ご迷惑しております。', mode: 'scroll', theme: 'orange'},
-      { text: '', mode: 'static' },
-    ],
-  ];
-
-  const SPEED_PX_PER_SEC = 120;
-  const MIN_SEC = 5;
-  const MAX_SEC = 120;
-
-  // フォントロード後に計測（任意だけどおすすめ）
-  if (document.fonts && document.fonts.ready) {
-    try { await document.fonts.ready; } catch (e) {}
-  }
-
-  let queue = [];
-  let currentIndex = -1;
-  const INTRO_COUNT = 3; // 最初に順番で流すセット数
-  let introIndex = 0;
-
-  function shuffle(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
+    .route-card h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+      color: #f3f8ff;
     }
-    return arr;
-  }
-  function refillQueue() {
-    queue = messageSets.map((_, i) => i);
-    shuffle(queue);
-    if (queue.length >= 2 && queue[0] === currentIndex) {
-      [queue[0], queue[1]] = [queue[1], queue[0]];
+    .route-card p {
+      margin: 0;
+      color: #b7c9de;
     }
-  }
-  function pickNextIndex() {
-    if (messageSets.length === 0) return -1;
-    if (messageSets.length === 1) return 0;
-
-    // 最初の3セットは順番固定
-    if (introIndex < Math.min(INTRO_COUNT, messageSets.length)) {
-      return introIndex++;
+    .route-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
-
-    if (queue.length === 0) refillQueue();
-    return queue.shift();
-  }
-
-  function parseColoredText(raw) {
-    if (!raw) return '';
-
-    // </colorText を解析
-    // 例: </green次は </orangeオマエダ
-    const regex = /<\/([a-zA-Z0-9_-]+)([^<]*)/g;
-
-    let result = '';
-    let lastIndex = 0;
-    let match;
-
-    while ((match = regex.exec(raw)) !== null) {
-      // タグ前の通常文字
-      result += raw.slice(lastIndex, match.index);
-
-      const color = match[1];
-      const text  = match[2];
-
-      result += `<span class="led-color-${color}">${text}</span>`;
-
-      lastIndex = regex.lastIndex;
+    .route-tags span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(152, 196, 255, 0.18);
+      background: rgba(7, 14, 28, 0.6);
+      color: #d4e9ff;
+      font-size: 11px;
+      letter-spacing: 0.06em;
     }
-
-    // 残り文字
-    result += raw.slice(lastIndex);
-
-    return result;
-  }
-
-  function applyRow(rowEl, line) {
-
-    const span = rowEl.querySelector('.led-marquee__text');
-    if (!span) return;
-
-    const mode = line?.mode ?? 'scroll';
-    const text = line?.text ?? '';
-
-    // テキスト更新
-    span.innerHTML = parseColoredText(text);
-
-
-    // モード反映（classで分ける）
-    rowEl.classList.toggle('static', mode === 'static');
-
-    // アニメ一旦停止＆クリア
-    span.style.animation = 'none';
-    span.style.transform = 'translateX(0px)';
-    span.style.removeProperty('--row-from');
-    span.style.removeProperty('--row-to');
-  }
-
-  function startRowAnimation(rowEl) {
-    const span = rowEl.querySelector('.led-marquee__text');
-    if (!span) return;
-
-    // static の行は流さない（左固定）
-    if (rowEl.classList.contains('static')) {
-      span.style.animation = 'none';
-      span.style.transform = 'translateX(0px)';
-      return;
+    .route-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: auto;
+      color: #dff1ff;
+      font-size: 12px;
     }
-
-    const container = inner.parentElement;
-    if (!container) return;
-
-    const containerWidth = container.getBoundingClientRect().width;
-    const textWidth = span.getBoundingClientRect().width;
-
-    const from = containerWidth;
-    const to = -textWidth;
-
-    span.style.setProperty('--row-from', from + 'px');
-    span.style.setProperty('--row-to', to + 'px');
-
-    const distance = containerWidth + textWidth;
-    const raw = distance / SPEED_PX_PER_SEC;
-    const duration = Math.max(MIN_SEC, Math.min(MAX_SEC, raw));
-
-    // 確実にリスタート
-    span.style.animation = 'none';
-    void span.offsetWidth;
-    span.style.animation = `marqueeRow ${duration}s linear 1 forwards`;
-  }
-
-  // 3行のうち「最後に終わった scroll 行」をトリガーに次セットへ
-  // ※ すべて static のセットでも進むようにフォールバックも入れる
-  let pendingScrollCount = 0;
-
-  function playSet(index) {
-    const set = messageSets[index];
-    const rows = inner.querySelectorAll('.led-row');
-
-    pendingScrollCount = 0;
-
-    rows.forEach((rowEl, i) => {
-      applyRow(rowEl, set[i]);
-    });
-
-    // DOM反映後に計測して開始
-    requestAnimationFrame(() => {
-      rows.forEach((rowEl) => {
-        if (!rowEl.classList.contains('static')) pendingScrollCount++;
-        startRowAnimation(rowEl);
-      });
-
-      // 全部 static のセットなら、一定時間後に次へ（見せる時間）
-      if (pendingScrollCount === 0) {
-        setTimeout(() => playNext(),  8000);
+    .flow-layout {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 14px;
+    }
+    .flow-card,
+    .spec-card {
+      padding: 18px;
+    }
+    .flow-card h2,
+    .spec-card h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+    .flow-list {
+      margin: 16px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 12px;
+    }
+    .flow-list li {
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(152, 196, 255, 0.18);
+      background: rgba(5, 12, 24, 0.54);
+    }
+    .flow-list strong {
+      display: block;
+      color: #f4f8ff;
+      font-size: 15px;
+    }
+    .flow-list span {
+      display: block;
+      margin-top: 6px;
+      color: #b7c9de;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .spec-list {
+      margin: 16px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+    .spec-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 10px 0;
+      border-top: 1px solid rgba(152, 196, 255, 0.14);
+      color: #b7c9de;
+      font-size: 13px;
+    }
+    .spec-list li:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .spec-list strong {
+      color: #eff6ff;
+      white-space: nowrap;
+    }
+    .footer-note {
+      margin: 0;
+      color: #97b9dc;
+      font-size: 12px;
+      text-align: center;
+    }
+    @media (max-width: 980px) {
+      .terminal-hero,
+      .flow-layout,
+      .terminal-grid {
+        grid-template-columns: 1fr;
       }
-    });
-  }
-
-  function playNext() {
-    const next = pickNextIndex();
-    if (next < 0) return;
-    currentIndex = next;
-    playSet(currentIndex);
-  }
-
-  // 行アニメ終了を監視（scroll 行だけカウント）
-  inner.addEventListener('animationend', (e) => {
-    const span = e.target.closest?.('.led-marquee__text');
-    if (!span) return;
-
-    const rowEl = span.closest('.led-row');
-    if (!rowEl || rowEl.classList.contains('static')) return;
-
-    pendingScrollCount = Math.max(0, pendingScrollCount - 1);
-    if (pendingScrollCount === 0) {
-      playNext();
+      .route-summary {
+        grid-template-columns: 1fr;
+      }
     }
-  });
+  </style>
+</head>
+<body>
+  <div class="bg-noise" aria-hidden="true"></div>
 
-  // hoverで停止（行ごと）
-  const marquee = inner.closest('.led-marquee');
-  if (marquee) {
-    marquee.addEventListener('mouseenter', () => {
-      inner.querySelectorAll('.led-marquee__text').forEach(s => s.style.animationPlayState = 'paused');
-    });
-    marquee.addEventListener('mouseleave', () => {
-      inner.querySelectorAll('.led-marquee__text').forEach(s => s.style.animationPlayState = 'running');
-    });
-  }
+  <header class="top-bar">
+    <p class="brand">TOKYO DIORAMA / <span class="brand-glow-green">TERMINAL</span></p>
+    <div class="top-bar-actions">
+      <span class="auth-chip">LOCAL HUB</span>
+      <a class="ghost-btn" href="./vewbasis.html">ビューワー起動</a>
+      <a class="ghost-btn" href="./edit.html">編集ページ</a>
+    </div>
+  </header>
 
-  // リサイズ時：今のセットを再スタート（ズレ防止）
-  const handleResize = () => {
-    if (currentIndex < 0) return;
-    playSet(currentIndex);
-  };
-  if ('ResizeObserver' in window) {
-    const ro = new ResizeObserver(() => handleResize());
-    ro.observe(inner.parentElement);
-  } else {
-    window.addEventListener('resize', handleResize, { passive: true });
-  }
+  <main class="page">
+    <section class="hero terminal-hero">
+      <div class="hero-copy terminal-copy">
+        <p class="eyebrow">CENTRAL ENTRY / LOCAL OPERATION DESK</p>
+        <div class="terminal-heading">
+          <h1>鉄道模型ターミナル</h1>
+          <span class="signal-badge">ROUTE READY</span>
+        </div>
+        <p class="lead">
+          この `index.html` は、公開閲覧、編集、モデル配布、ベースビューワーを束ねる入口です。
+          `st_` `ct_` `tr_` の素材を使い分けながら、必要なページへここから分岐できます。
+        </p>
+        <div class="terminal-actions">
+          <a class="primary-btn" href="./vewbasis.html">ベースビューワーを開く</a>
+          <a class="ghost-btn" href="./public.html">公開ページへ</a>
+          <a class="ghost-btn" href="./manual.html">操作マニュアル</a>
+        </div>
+        <div class="route-summary" aria-label="主要導線">
+          <div class="route-pill">
+            <strong>VIEW</strong>
+            <span>`vewbasis.html` でワールドを直接表示</span>
+          </div>
+          <div class="route-pill">
+            <strong>EDIT</strong>
+            <span>`edit.html` で編集枠と保存済み素材を管理</span>
+          </div>
+          <div class="route-pill">
+            <strong>ASSET</strong>
+            <span>`assets.html` と `public.html` で配布物を扱う</span>
+          </div>
+        </div>
+      </div>
 
-  playNext();
-});
-</script>
+      <div class="terminal-status">
+        <aside class="status-board" aria-label="運行状況">
+          <p class="status-title">ROUTE MATRIX</p>
+          <div class="status-row">
+            <span>Viewer Core</span>
+            <strong class="on">./vewbasis.html</strong>
+          </div>
+          <div class="status-row">
+            <span>Public Access</span>
+            <strong class="on">./public.html</strong>
+          </div>
+          <div class="status-row">
+            <span>Edit Console</span>
+            <strong class="on">./edit.html</strong>
+          </div>
+          <div class="status-row">
+            <span>Model Library</span>
+            <strong class="on">./assets.html</strong>
+          </div>
+          <div class="status-row">
+            <span>Manual</span>
+            <strong class="on">./manual.html</strong>
+          </div>
+          <div class="status-callout">
+            サムネイル撮影は `public_local_load.html` から行います。
+            編集途中のワールドに対して、構図決定とプレビュー保存を行うための補助ルートです。
+          </div>
+        </aside>
+      </div>
+    </section>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const guide = document.getElementById('mode-video-guide');
-  const player = document.getElementById('mode-video-player');
-  const status = document.getElementById('mode-video-status');
-  if (!guide || !player) { return; }
+    <section class="terminal-grid" aria-label="主要ページ">
+      <a class="route-card" href="./vewbasis.html" data-tone="view">
+        <div class="route-topline">
+          <span>DIRECT RUNTIME</span>
+          <strong>VIEW BASIS</strong>
+        </div>
+        <h2>ベースビューワー</h2>
+        <p>現在のランタイム表示面です。構造物・都市・車両の読み込み後、そのままワールド表示へ進みます。</p>
+        <div class="route-tags">
+          <span>Runtime</span>
+          <span>World View</span>
+          <span>Direct Open</span>
+        </div>
+        <div class="route-foot">
+          <span>起点になる表示面</span>
+          <span>→ Open</span>
+        </div>
+      </a>
 
-  const tabs = Array.from(guide.querySelectorAll('.mode-video-heading'));
-  if (tabs.length === 0) { return; }
+      <a class="route-card" href="./public.html" data-tone="asset">
+        <div class="route-topline">
+          <span>PUBLIC ACCESS</span>
+          <strong>CATALOG</strong>
+        </div>
+        <h2>公開ページ</h2>
+        <p>公開ワールド一覧と、構造物・都市・車両のダウンロード導線をまとめた一般向け入口です。</p>
+        <div class="route-tags">
+          <span>Public Maps</span>
+          <span>Download</span>
+          <span>Quota</span>
+        </div>
+        <div class="route-foot">
+          <span>配布と閲覧の表玄関</span>
+          <span>→ Open</span>
+        </div>
+      </a>
 
-  const activateTab = (target) => {
-    tabs.forEach((tab) => {
-      const isActive = tab === target;
-      tab.classList.toggle('is-active', isActive);
-      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-    });
-  };
+      <a class="route-card" href="./edit.html" data-tone="edit">
+        <div class="route-topline">
+          <span>EDITOR ACCESS</span>
+          <strong>WORKBENCH</strong>
+        </div>
+        <h2>編集ページ</h2>
+        <p>編集枠の選択、保存済みデータの再開、サムネ撮影、公開前の管理を行うワークベンチです。</p>
+        <div class="route-tags">
+          <span>Slot Control</span>
+          <span>Resume</span>
+          <span>Publish Prep</span>
+        </div>
+        <div class="route-foot">
+          <span>編集作業の主導線</span>
+          <span>→ Open</span>
+        </div>
+      </a>
 
-  const playByTab = async (tab, { autoplay = true } = {}) => {
-    if (!tab) { return; }
-    activateTab(tab);
-    const src = tab.dataset.videoSrc || '';
-    const label = (tab.textContent || '').trim();
-    if (!src) {
-      if (status) { status.textContent = `「${label}」の動画パスが未設定です。`; }
-      player.removeAttribute('src');
-      player.load();
-      return;
-    }
-    if (player.getAttribute('src') !== src) {
-      player.setAttribute('src', src);
-      player.load();
-    }
-    if (status) { status.textContent = `再生中: ${label}`; }
-    if (!autoplay) { return; }
-    try {
-      await player.play();
-    } catch (_e) {
-      if (status) { status.textContent = `「${label}」を選択しました。再生ボタンを押してください。`; }
-    }
-  };
+      <a class="route-card" href="./assets.html" data-tone="asset">
+        <div class="route-topline">
+          <span>MODEL SUPPLY</span>
+          <strong>LIBRARY</strong>
+        </div>
+        <h2>モデル配布庫</h2>
+        <p>都市モデルと列車モデルを選んで取得するページです。ローカルローダーへ渡す前段の素材置き場になります。</p>
+        <div class="route-tags">
+          <span>ct_</span>
+          <span>tr_</span>
+          <span>Download Hub</span>
+        </div>
+        <div class="route-foot">
+          <span>素材の補給線</span>
+          <span>→ Open</span>
+        </div>
+      </a>
 
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      playByTab(tab, { autoplay: true });
-    });
-  });
+      <a class="route-card" href="./public_local_load.html?runtime_map=edit_upload" data-tone="view">
+        <div class="route-topline">
+          <span>THUMBNAIL CAPTURE</span>
+          <strong>LOCAL VIEWER</strong>
+        </div>
+        <h2>サムネ撮影ルート</h2>
+        <p>編集ワールドを読み込んで構図を決め、スロットのサムネイルを保存するための補助ビューワーです。</p>
+        <div class="route-tags">
+          <span>Capture</span>
+          <span>Preview</span>
+          <span>Slot Thumbnail</span>
+        </div>
+        <div class="route-foot">
+          <span>編集補助の短絡ルート</span>
+          <span>→ Open</span>
+        </div>
+      </a>
 
-  playByTab(tabs[0], { autoplay: false });
-});
-</script>
+      <a class="route-card" href="./manual.html" data-tone="asset">
+        <div class="route-topline">
+          <span>REFERENCE</span>
+          <strong>MANUAL</strong>
+        </div>
+        <h2>操作マニュアル</h2>
+        <p>ボタン群とモード構成の説明書です。編集機能の意味や UI ツリーを確認したいときに使います。</p>
+        <div class="route-tags">
+          <span>Guide</span>
+          <span>UI Tree</span>
+          <span>Reference</span>
+        </div>
+        <div class="route-foot">
+          <span>構成確認用の参照面</span>
+          <span>→ Open</span>
+        </div>
+      </a>
+    </section>
 
-<script>
-window.addEventListener('load', () => {
-  const group = document.getElementById('UiGroup');
-  if (!group) return;
+    <section class="flow-layout" aria-label="起動フロー">
+      <div class="flow-card">
+        <p class="meta-label">OPERATION FLOW</p>
+        <h2>起動順</h2>
+        <ol class="flow-list">
+          <li>
+            <strong>1. 素材を揃える</strong>
+            <span>`public.html` または `assets.html` で `st_` `ct_` `tr_` を確認し、必要なデータを手元へ集めます。</span>
+          </li>
+          <li>
+            <strong>2. 閲覧か編集かを選ぶ</strong>
+            <span>表示確認だけなら `vewbasis.html`、編集作業に入るなら `edit.html` を起点にします。</span>
+          </li>
+          <li>
+            <strong>3. 必要ならサムネを撮る</strong>
+            <span>`public_local_load.html` でワールドを読み込み、構図を決めてサムネイルへ反映します。</span>
+          </li>
+        </ol>
+      </div>
 
-  let tooltip = document.getElementById('ui-tooltip');
-  if (!tooltip) {
-    tooltip = document.createElement('div');
-    tooltip.id = 'ui-tooltip';
-    tooltip.className = 'ui-tooltip';
-    tooltip.setAttribute('role', 'tooltip');
-    const uiRoot = document.getElementById('three-ui') || document.body;
-    uiRoot.appendChild(tooltip);
-  }
+      <aside class="spec-card">
+        <p class="meta-label">FILE GUIDE</p>
+        <h2>素材の目印</h2>
+        <ul class="spec-list">
+          <li><strong>st_~</strong><span>構造物データ。公開ワールドや編集再開の基礎になる本体。</span></li>
+          <li><strong>ct_~</strong><span>都市モデル。街並みや背景オブジェクトの読み込み用。</span></li>
+          <li><strong>tr_~</strong><span>列車モデル。車両フォルダまたは個別モデルとして扱う前提。</span></li>
+          <li><strong>vewbasis.html</strong><span>旧 `index.html` の役割を引き継いだベース表示面。</span></li>
+        </ul>
+      </aside>
+    </section>
+  </main>
 
-  const labelsById = {
-    'see': '鑑賞モード',
-    'edit': '編集モード',
-    'rail': 'レール編集',
-    'creat': 'クリエイトモード',
-    'Difference': '差分くり抜きメニュー',
-    'space': '平面を配置して空間定義',
-    'add/2': 'space: 平面を追加',
-    'move/2': 'space: 面変形',
-    'tube': 'space: チューブ生成',
-    'excavation': '現在のプレビュー形状でくり抜き実行',
-    'custom': 'カスタム編集',
-
-    'view': 'プレビュー表示',
-    'add_point': 'ポイント追加',
-    'x_z_move': '生成基準面の平面移動',
-    'y_add': '生成時の高さの変更',
-    'template': '生成サポーターの追加',
-    'guide': 'ガイドメニュー',
-    'add': 'ガイド追加',
-    'rotation': '回転',
-    'search': '角度サーチ',
-    'rotation/2': 'ポイント回転',
-    'move_point': 'ポイント移動',
-    'copy': 'コピー',
-    'style': 'スタイル編集',
-    'scale': 'ポイントスケール',
-    'change_angle': '移動平面の角度変更',
-    'x_z': '平面(XZ軸) 移動',
-    'y': '垂直(Y軸) 移動',
-    'x_z_sf': '平面(XZ軸) 微調整',
-    'y_sf': '垂直(Y軸) 微調整',
-    'construction/2': '構造物生成',
-
-    'structure': '構造物メニュー',
-    'construction': '構造物生成',
-    'bridge': '橋梁',
-    'elevated': '高架',
-    'wall': '壁',
-    'floor': '床',
-    'pillar': '柱',
-    'catenary_pole': '架線柱',
-    'rib_bridge': 'リブ橋',
-    'tunnel_rect': '矩形トンネル',
-    'tunnel_circle': '円形トンネル',
-
-    'Round_bar': '丸鋼',
-    'H_beam': 'H形鋼',
-    'T_beam': 'T形鋼',
-    'L_beam': 'L形鋼',
-    'rite': 'ライト',
-    'tubular': '管',
-
-    'new': '新規',
-    'move': '移動',
-    'construct': '構築',
-    'new/2': '新規 (構造物)',
-    'move/3': '移動 (カスタム)',
-    'x_z/2': '平面(XZ軸) 移動 (カスタム)',
-    'y/2': '垂直(Y軸) 移動 (カスタム)',
-  };
-
-  let pressTimer = null;
-  let activeBtn = null;
-
-  function showTooltip(btn) {
-    const label = labelsById[btn.id] || btn.getAttribute('aria-label') || '説明未設定';
-    tooltip.textContent = label;
-
-    const btnRect = btn.getBoundingClientRect();
-    const left = btnRect.right + 6;
-    const top = btnRect.bottom + 6;
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
-    tooltip.style.position = 'fixed';
-    tooltip.style.opacity = '1';
-    tooltip.style.transform = 'translateY(0)';
-
-    tooltip.classList.add('is-visible');
-  }
-
-  function hideTooltip() {
-    tooltip.style.opacity = '';
-    tooltip.style.transform = '';
-    tooltip.classList.remove('is-visible');
-  }
-
-  function clearPressTimer() {
-    if (pressTimer) {
-      clearTimeout(pressTimer);
-      pressTimer = null;
-    }
-  }
-
-  function getBtnFromEvent(e) {
-    const btn = e.target.closest?.('button');
-    if (!btn || !group.contains(btn)) return null;
-    return btn;
-  }
-
-  group.addEventListener('pointerover', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = btn;
-    showTooltip(btn);
-  });
-
-  group.addEventListener('pointerout', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = null;
-    hideTooltip();
-  });
-
-  group.addEventListener('pointerdown', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = btn;
-    clearPressTimer();
-    pressTimer = setTimeout(() => {
-      showTooltip(btn);
-    }, 450);
-  });
-
-  group.addEventListener('pointerup', () => {
-    clearPressTimer();
-    if (!activeBtn) return;
-    hideTooltip();
-  });
-
-  group.addEventListener('pointercancel', () => {
-    clearPressTimer();
-    if (!activeBtn) return;
-    hideTooltip();
-  });
-
-  // Fallback for environments where pointer events are not reliable
-  group.addEventListener('mouseover', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = btn;
-    showTooltip(btn);
-  });
-  group.addEventListener('mouseout', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = null;
-    hideTooltip();
-  });
-  group.addEventListener('touchstart', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    activeBtn = btn;
-    clearPressTimer();
-    pressTimer = setTimeout(() => {
-      showTooltip(btn);
-    }, 450);
-  }, { passive: true });
-
-  // Click fallback (debug / desktop)
-  group.addEventListener('click', (e) => {
-    const btn = getBtnFromEvent(e);
-    if (!btn) return;
-    showTooltip(btn);
-    setTimeout(() => {
-      if (activeBtn === btn) return;
-      hideTooltip();
-    }, 1200);
-  });
-});
-</script>
-
+  <footer class="footer">
+    <p class="footer-note">Train_EditMode_demo / Terminal Entry</p>
+  </footer>
 </body>
 </html>
