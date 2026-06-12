@@ -665,6 +665,20 @@ function markRuntimeMapStructurePostProcessReady(reason = 'unknown') {
     });
     return;
   }
+  if (lastLoadedStandaloneDifferencePayload && countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload) > 0) {
+    try {
+      restoreDifferenceSpacesFromPayload(lastLoadedStandaloneDifferencePayload, { clearExisting: false, applyToCity: false });
+      console.info('[difference][postprocess] restored standalone spaces after structure post process', {
+        reason,
+        missingStandaloneSpaceCountAfter: countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload),
+      });
+    } catch (err) {
+      console.warn('[difference][postprocess] failed to restore standalone spaces after structure post process', {
+        reason,
+        err,
+      });
+    }
+  }
   runtimeMapStructurePostProcessReady = true;
   console.info('[runtime][load-complete] structure post process ready', {
     reason,
@@ -8215,6 +8229,8 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
   }
 
   function diagnoseWorldSaveBeforeExport() {
+    const differenceSpaceDetails = collectDifferenceSpaceDiagnosticDetails();
+    const differenceSpaceSummary = buildDifferenceSpaceDiagnosticSummary(differenceSpaceDetails);
     const copiedGroups = collectCopiedStructureGroupsForSave();
     const mismatches = [];
     copiedGroups.forEach((entry) => {
@@ -8243,7 +8259,9 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       copiedGroupCount: copiedGroups.length,
       mismatchCount: mismatches.length,
       mismatches,
+      differenceSpaceSummary,
     };
+    console.info('[world-save-diagnostic] difference spaces before save', differenceSpaceSummary);
     if (mismatches.length > 0) {
       console.warn('[world-save-diagnostic] copied group/source mismatch before save', summary);
       showTopNotice(`[world-save-diagnostic] 未同期グループ ${mismatches.length}件`, 5200);
@@ -8251,6 +8269,67 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       console.info('[world-save-diagnostic] copied groups synced before save', summary);
     }
     return summary;
+  }
+
+  function collectDifferenceSpaceDiagnosticDetails() {
+    return differenceSpacePlanes.map((mesh, index) => {
+      const hasParent = Boolean(mesh?.parent);
+      const isDifferenceSpacePlane = Boolean(mesh?.userData?.differenceSpacePlane);
+      const railTrackNames = Array.isArray(mesh?.userData?.differenceRailTrackNames)
+        ? mesh.userData.differenceRailTrackNames
+            .map((name) => String(name || '').trim())
+            .filter((name) => name.length > 0)
+        : [];
+      const isReadonlyTunnel = isDifferenceReadonlyTunnelMesh(mesh);
+      const skipPersistentSave = shouldSkipDifferenceSpaceInPersistentSave(mesh);
+      const skipReasons = [];
+      if (!hasParent) { skipReasons.push('no_parent'); }
+      if (!isDifferenceSpacePlane) { skipReasons.push('not_difference_space_plane'); }
+      if (railTrackNames.length > 0) { skipReasons.push('rail_track_difference'); }
+      if (isReadonlyTunnel) { skipReasons.push('readonly_tunnel'); }
+      if (mesh?.userData?.differenceUnifiedResult && hasTunnelCircleGenerationRuns()) {
+        skipReasons.push('unified_result_with_tunnel_circle_run');
+      }
+      if (skipPersistentSave && skipReasons.length < 1) {
+        skipReasons.push('should_skip_persistent_save');
+      }
+      const position = mesh?.position?.isVector3
+        ? [
+            roundWorldSaveDiagnosticValue(mesh.position.x),
+            roundWorldSaveDiagnosticValue(mesh.position.y),
+            roundWorldSaveDiagnosticValue(mesh.position.z),
+          ]
+        : null;
+      return {
+        index,
+        id: mesh?.id ?? null,
+        name: String(mesh?.name || ''),
+        hasParent,
+        isDifferenceSpacePlane,
+        savedAsDifferenceSpace: hasParent
+          && isDifferenceSpacePlane
+          && railTrackNames.length < 1
+          && !skipPersistentSave,
+        skipPersistentSave,
+        skipReasons,
+        projectorType: String(mesh?.userData?.differenceProjectorType || '').trim() || 'box',
+        railTrackNames,
+        differenceUnifiedResult: Boolean(mesh?.userData?.differenceUnifiedResult),
+        differenceReadonlyDisplay: Boolean(mesh?.userData?.differenceReadonlyDisplay),
+        geometryPositionCount: Number(mesh?.geometry?.attributes?.position?.count) || 0,
+        position,
+      };
+    });
+  }
+
+  function buildDifferenceSpaceDiagnosticSummary(differenceSpaceDetails = []) {
+    return {
+      total: differenceSpaceDetails.length,
+      saved: differenceSpaceDetails.filter((entry) => entry.savedAsDifferenceSpace).length,
+      skipped: differenceSpaceDetails.filter((entry) => !entry.savedAsDifferenceSpace).length,
+      details: differenceSpaceDetails,
+      railOperationCount: differenceRailOperations.length,
+    };
   }
 
   function collectCopiedStructureGroupIdsForSave() {
@@ -15238,6 +15317,26 @@ function applyStructurePreviewLikeVisibility() {
   setMeshListOpacity(pointMeshes, 0);
 }
 
+function syncDifferenceSpaceVisualStateForDisplay(logLabel = '[difference]') {
+  const liveDifferenceSpaces = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane);
+  if (liveDifferenceSpaces.length < 1) { return 0; }
+  targetObjects = liveDifferenceSpaces;
+  setMeshListOpacity(targetObjects, 1);
+  liveDifferenceSpaces.forEach((mesh) => {
+    applyDifferenceSpaceMeshStyle(mesh, { visible: true });
+    applyDifferenceOpenFacesToMesh(mesh);
+  });
+  ensureDifferenceRailDisplayMeshes();
+  setDifferenceRailDisplayMeshesVisible(true);
+  updateDifferenceModePanels();
+  refreshDifferencePreview();
+  syncDifferenceReadonlyTunnelSpaceVisibility();
+  console.info(`${logLabel} synced difference space display`, {
+    liveDifferenceSpaceCount: liveDifferenceSpaces.length,
+  });
+  return liveDifferenceSpaces.length;
+}
+
 function shouldShowDifferenceReadonlyTunnelSpaces() {
   try {
     return Boolean(
@@ -15259,8 +15358,19 @@ function hasTunnelCircleGenerationRuns() {
 function shouldSkipDifferenceSpaceInPersistentSave(mesh) {
   if (!mesh?.userData?.differenceSpacePlane) { return true; }
   if (isDifferenceReadonlyTunnelMesh(mesh)) { return true; }
+  if (isPinGeneratedDifferenceSpaceMesh(mesh)) { return true; }
   if (mesh.userData?.differenceUnifiedResult && hasTunnelCircleGenerationRuns()) { return true; }
   return false;
+}
+
+function isPinGeneratedDifferenceSpaceMesh(mesh) {
+  if (!mesh?.userData?.differenceSpacePlane) { return false; }
+  const runtimeId = String(
+    mesh?.userData?.pinGenerationRuntimeId
+    || getPinGenerationRuntimeIdFromObjectName(mesh?.name || '')
+    || ''
+  ).trim();
+  return runtimeId.length > 0;
 }
 
 function getDifferenceReadonlyTunnelRaycast(enabled = false) {
@@ -19238,12 +19348,22 @@ function activatePublicRuntimeObjectViewMode() {
 function applyRuntimeMapLoadedUiState() {
   activateSeeModeOnLoadCompletePending = false;
   completeLoadingOverlayState('読み込み完了');
-  // clearCreateHistory();
-  // clearDifferenceHistory();
-  UIevent('rail', 'inactive');
-  UIevent('structure', 'inactive');
-  UIevent('edit', 'inactive');
-  UIevent('see', 'active');
+  const appliedSavedUiState = typeof window !== 'undefined'
+    && typeof window.applyTrainEditSavedUiState === 'function'
+    ? window.applyTrainEditSavedUiState(null)
+    : false;
+  const appliedDifferenceSpaceUi = !appliedSavedUiState
+    && getActiveDifferenceSpaces().length > 0
+    && typeof window !== 'undefined'
+    && typeof window.applyTrainEditUiStateById === 'function'
+    ? window.applyTrainEditUiStateById('space')
+    : false;
+  if (!appliedSavedUiState && !appliedDifferenceSpaceUi) {
+    UIevent('rail', 'inactive');
+    UIevent('structure', 'inactive');
+    UIevent('edit', 'inactive');
+    UIevent('see', 'active');
+  }
   hideLoadingOverlayElement();
 }
 
@@ -19612,22 +19732,34 @@ async function loadRuntimeMapFromPublicUpload() {
       lastLoadedStandaloneDifferencePayload = standaloneDifferenceRow?.payload && typeof standaloneDifferenceRow.payload === 'object'
         ? structuredClone(standaloneDifferenceRow.payload)
         : null;
-      const expectedStandaloneSpaceCount = Array.isArray(standaloneDifferenceRow?.payload?.differenceSpaces)
-        ? standaloneDifferenceRow.payload.differenceSpaces.length
-        : 0;
-      const liveDifferenceSpaceCount = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane).length;
-      if (standaloneDifferenceRow && expectedStandaloneSpaceCount > 0 && liveDifferenceSpaceCount < expectedStandaloneSpaceCount) {
+      const restoreStandaloneDifferenceSpacesIfMissing = (stageLabel = '') => {
+        const expectedStandaloneSpaceCount = Array.isArray(standaloneDifferenceRow?.payload?.differenceSpaces)
+          ? standaloneDifferenceRow.payload.differenceSpaces.length
+          : 0;
+        const liveDifferenceSpaceCount = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane).length;
+        const missingStandaloneSpaceCount = standaloneDifferenceRow
+          ? countMissingStandaloneDifferenceSpaces(standaloneDifferenceRow.payload)
+          : 0;
+        if (!standaloneDifferenceRow || expectedStandaloneSpaceCount < 1 || missingStandaloneSpaceCount < 1) {
+          return false;
+        }
         try {
           restoreDifferenceSpacesFromPayload(standaloneDifferenceRow.payload, { clearExisting: false, applyToCity: true });
           console.info('[public_upload][ct] fallback restored standalone difference spaces', {
+            stageLabel,
             expectedStandaloneSpaceCount,
+            missingStandaloneSpaceCountBefore: missingStandaloneSpaceCount,
             liveDifferenceSpaceCountBefore: liveDifferenceSpaceCount,
             liveDifferenceSpaceCountAfter: differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane).length,
+            missingStandaloneSpaceCountAfter: countMissingStandaloneDifferenceSpaces(standaloneDifferenceRow.payload),
           });
+          return true;
         } catch (err) {
           console.warn('[public_upload][ct] fallback restore of standalone difference spaces failed', err);
+          return false;
         }
-      }
+      };
+      restoreStandaloneDifferenceSpacesIfMissing('before_source_group_restore');
       if (sourceGroupPayloadRows.length > 0) {
         console.info('[public_upload][group_msgpack] restoring source groups start', {
           count: sourceGroupPayloadRows.length,
@@ -19682,6 +19814,7 @@ async function loadRuntimeMapFromPublicUpload() {
           throw err;
         }
       });
+      restoreStandaloneDifferenceSpacesIfMissing('after_all_restore_steps');
       continue;
     }
     let payload = null;
@@ -26898,11 +27031,9 @@ function applyDifferenceOpenFacesToMesh(mesh) {
 function applyDifferenceSpaceMeshStyle(mesh, { visible = true } = {}) {
   if (!mesh) { return; }
   mesh.renderOrder = getDifferenceSpaceBoxRenderOrder();
+  mesh.visible = visible;
   if (isDifferenceOpenFacesSupportedMesh(mesh)) {
-    const previousVisible = mesh.visible;
-    mesh.visible = visible;
     applyDifferenceOpenFacesToMesh(mesh);
-    mesh.visible = previousVisible;
     return;
   }
   if (Array.isArray(mesh.material)) {
@@ -29775,6 +29906,68 @@ function payloadHasOnlyDifferenceSpaces(payload) {
   );
 }
 
+function getExpectedDifferenceProjectorType(rawSpace) {
+  return String(rawSpace?.differenceProjectorType || '').trim() || 'box';
+}
+
+function isLiveDifferenceSpaceMatchingSerializedSpace(mesh, rawSpace, tolerance = 1e-3) {
+  if (!mesh?.parent || !mesh?.userData?.differenceSpacePlane || !rawSpace || typeof rawSpace !== 'object') {
+    return false;
+  }
+  if (isPinGeneratedDifferenceSpaceMesh(mesh)) { return false; }
+  const liveProjectorType = String(mesh?.userData?.differenceProjectorType || '').trim() || 'box';
+  const expectedProjectorType = getExpectedDifferenceProjectorType(rawSpace);
+  if (liveProjectorType !== expectedProjectorType) { return false; }
+  const liveRailTrackNames = Array.isArray(mesh?.userData?.differenceRailTrackNames)
+    ? mesh.userData.differenceRailTrackNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const expectedTrackNames = Array.isArray(rawSpace?.trackNames)
+    ? rawSpace.trackNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  if (liveRailTrackNames.length !== expectedTrackNames.length) { return false; }
+  if (liveRailTrackNames.length > 0) {
+    const liveKey = liveRailTrackNames.slice().sort().join('|');
+    const expectedKey = expectedTrackNames.slice().sort().join('|');
+    if (liveKey !== expectedKey) { return false; }
+  }
+  const livePos = mesh?.position?.toArray?.() || [];
+  const expectedPos = Array.isArray(rawSpace?.position) ? rawSpace.position : [0, 0, 0];
+  const liveQuat = mesh?.quaternion?.toArray?.() || [];
+  const expectedQuat = Array.isArray(rawSpace?.quaternion) ? rawSpace.quaternion : [0, 0, 0, 1];
+  const liveScale = mesh?.scale?.toArray?.() || [];
+  const expectedScale = Array.isArray(rawSpace?.scale) ? rawSpace.scale : [1, 1, 1];
+  const approxEqualArray = (a, b) => (
+    Array.isArray(a)
+    && Array.isArray(b)
+    && a.length === b.length
+    && a.every((value, index) => Math.abs((Number(value) || 0) - (Number(b[index]) || 0)) <= tolerance)
+  );
+  if (!approxEqualArray(livePos, expectedPos)) { return false; }
+  if (!approxEqualArray(liveQuat, expectedQuat)) { return false; }
+  if (!approxEqualArray(liveScale, expectedScale)) { return false; }
+  return true;
+}
+
+function countMissingStandaloneDifferenceSpaces(payload) {
+  const spaces = Array.isArray(payload?.differenceSpaces) ? payload.differenceSpaces : [];
+  if (spaces.length < 1) { return 0; }
+  const liveMeshes = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane);
+  const usedMeshIds = new Set();
+  let missingCount = 0;
+  spaces.forEach((rawSpace) => {
+    const matched = liveMeshes.find((mesh) => {
+      if (usedMeshIds.has(mesh.id)) { return false; }
+      if (!isLiveDifferenceSpaceMatchingSerializedSpace(mesh, rawSpace)) { return false; }
+      usedMeshIds.add(mesh.id);
+      return true;
+    });
+    if (!matched) {
+      missingCount += 1;
+    }
+  });
+  return missingCount;
+}
+
 function isCanonicalSerializedDifferenceBoxSpace(rawSpace) {
   if (!rawSpace || typeof rawSpace !== 'object') { return false; }
   if (String(rawSpace?.differenceProjectorType || '').trim().toLowerCase() !== 'box') { return false; }
@@ -30727,6 +30920,8 @@ function buildDifferenceRailCutSectionWallMeshFromCutter(cutterMesh, { normalYTh
 }
 
 function runDifferenceOnSinjyukuFromSelectedPoints() {
+  const beforeSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+  console.info('[difference-excavation] before selected-points run', beforeSummary);
   const activeSpaces = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.geometry);
   const spaceCutter = buildDifferenceCutterMeshFromMeshList(activeSpaces);
   const selectedPoints = getDifferenceSelectedPoints();
@@ -30785,9 +30980,17 @@ function runDifferenceOnSinjyukuFromSelectedPoints() {
   if (changedCount < 1) {
     console.warn('Difference executed, but no sinjyuku_city mesh was updated.');
     updateDifferenceStatus('対象に交差しませんでした。');
+    const afterNoopSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+    console.info('[difference-excavation] after selected-points run (no change)', afterNoopSummary);
     return false;
   }
   console.log(`Difference applied to ${changedCount} sinjyuku meshes.`);
+  const afterSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+  console.info('[difference-excavation] after selected-points run', {
+    changedCount,
+    before: beforeSummary,
+    after: afterSummary,
+  });
   updateDifferenceStatus(`excavation完了: ${changedCount} メッシュ更新`);
   return true;
 }
@@ -31180,6 +31383,8 @@ function buildDifferenceCutterMeshFromRailTracks({
 }
 
 function runDifferenceOnSinjyukuFromRailTracks(options = {}) {
+  const beforeSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+  console.info('[difference-excavation] before rail run', beforeSummary);
   const keepPreview = options?.keepPreview !== false;
   const appliedHeight = readDifferenceLineBandHeight();
   const operation = buildDifferenceRailOperationFromTrackNames(null, { bandHeight: appliedHeight });
@@ -31213,12 +31418,20 @@ function runDifferenceOnSinjyukuFromRailTracks(options = {}) {
       clearDifferencePreviewTube();
     }
     updateDifferenceStatus('線路形状でのくり抜き対象が見つかりませんでした。');
+    const afterNoopSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+    console.info('[difference-excavation] after rail run (no change)', afterNoopSummary);
     return false;
   }
   const usedTrackCount = Number(cutter.userData?.railTrackCount) || 0;
   const rightEdge = String(cutter.userData?.rightEdgeTrackName || '');
   const leftEdge = String(cutter.userData?.leftEdgeTrackName || '');
   const savedMesh = persistDifferenceSpaceFromMesh(cutter);
+  const afterSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
+  console.info('[difference-excavation] after rail run', {
+    changedCount,
+    before: beforeSummary,
+    after: afterSummary,
+  });
   updateDifferenceStatus(
     `線路くり抜き完了: ${changedCount} メッシュ更新 / グループ ${usedTrackCount} 本 / 端: ${rightEdge} - ${leftEdge}`
     + (savedMesh ? ' / difference保存対象へ追加' : '')
@@ -40212,7 +40425,7 @@ export function UIevent (uiID, toggle){
   }} else if ( uiID === 'space' ){ if ( toggle === 'active' ){
   console.log( 'space _active' )
     if (blockManualDioramaSpaceMode()) { return; }
-    if (differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane).length < 1
+    if (countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload) > 0
       && lastLoadedStandaloneDifferencePayload
       && Array.isArray(lastLoadedStandaloneDifferencePayload?.differenceSpaces)
       && lastLoadedStandaloneDifferencePayload.differenceSpaces.length > 0) {
@@ -40233,14 +40446,12 @@ export function UIevent (uiID, toggle){
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'Standby'
     search_object = false
-    targetObjects = differenceSpacePlanes.filter((m) => m?.parent)
-    setMeshListOpacity(targetObjects, 1)
+    syncDifferenceSpaceVisualStateForDisplay('[difference][space]');
     applyStructurePreviewLikeVisibility();
     if (differencePanel) {
       differencePanel.style.display = 'none';
     }
     updateDifferenceModePanels();
-    refreshDifferencePreview();
   } else {
   console.log( 'space _inactive' )
     differenceSpaceModeActive = false

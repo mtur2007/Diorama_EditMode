@@ -765,6 +765,27 @@ function applyUiState(indexPath, rootKeys) {
   }
 }
 
+function applyUiStateById(id) {
+  const indexPath = Allkeys[String(id || '').trim()];
+  if (!Array.isArray(indexPath) || indexPath.length < 1) { return false; }
+  const applied = applyUiState(indexPath, rootKeys);
+  if (applied) {
+    saveUiState(indexPath);
+  }
+  return applied;
+}
+
+function applySavedUiStateOrDefault(defaultId = 'see') {
+  const savedPath = loadUiState();
+  if (applyUiState(savedPath, rootKeys)) {
+    return true;
+  }
+  if (!defaultId) {
+    return false;
+  }
+  return applyUiStateById(defaultId);
+}
+
 UiGroup.addEventListener('click', (event) => {
   // クリックされた要素から一番近い button を探す
   const btn = event.target.closest('button');
@@ -801,6 +822,8 @@ UiGroup.addEventListener('touchstart', (event) => {
     showRootButtons(rootKeys);
   });
 
-getValueByIndex(rename_uiTree, UiGroup, Allkeys['see'] || [0]);
-saveUiState(Allkeys['see'] || [0]);
+window.applyTrainEditUiStateById = applyUiStateById;
+window.applyTrainEditSavedUiState = applySavedUiStateOrDefault;
+
+applySavedUiStateOrDefault('see');
   
