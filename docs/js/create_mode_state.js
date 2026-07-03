@@ -19,21 +19,26 @@ export function createCreateModeStateCodec({ encode, decode }) {
 
   function packState(state) {
     const packed = structuredClone(state);
+    const packSpaces = (spaces) => {
+      spaces.forEach((ds) => {
+        const geom = ds?.geometry;
+        if (!geom || !Array.isArray(geom.position)) { return; }
+        const posF32 = Float32Array.from(geom.position);
+        const rawIndex = Array.isArray(geom.index) ? geom.index : [];
+        const idxMax = maxIndexValue(rawIndex);
+        const idxTyped = (idxMax >= 0 && idxMax <= 65535)
+          ? Uint16Array.from(rawIndex)
+          : Uint32Array.from(rawIndex);
+        ds.geometry = {
+          position: { dtype: 'f32', itemSize: 3, data: u8view(posF32) },
+          index: { dtype: (idxTyped instanceof Uint16Array) ? 'u16' : 'u32', data: u8view(idxTyped) },
+        };
+      });
+    };
     const spaces = Array.isArray(packed?.differenceSpaces) ? packed.differenceSpaces : [];
-    spaces.forEach((ds) => {
-      const geom = ds?.geometry;
-      if (!geom || !Array.isArray(geom.position)) { return; }
-      const posF32 = Float32Array.from(geom.position);
-      const rawIndex = Array.isArray(geom.index) ? geom.index : [];
-      const idxMax = maxIndexValue(rawIndex);
-      const idxTyped = (idxMax >= 0 && idxMax <= 65535)
-        ? Uint16Array.from(rawIndex)
-        : Uint32Array.from(rawIndex);
-      ds.geometry = {
-        position: { dtype: 'f32', itemSize: 3, data: u8view(posF32) },
-        index: { dtype: (idxTyped instanceof Uint16Array) ? 'u16' : 'u32', data: u8view(idxTyped) },
-      };
-    });
+    const areaSpaces = Array.isArray(packed?.areaSpaces) ? packed.areaSpaces : [];
+    packSpaces(spaces);
+    packSpaces(areaSpaces);
     return encode(packed);
   }
 
@@ -64,18 +69,23 @@ export function createCreateModeStateCodec({ encode, decode }) {
 
   function unpackState(bytes) {
     const state = decode(bytes);
+    const unpackSpaces = (spaces) => {
+      spaces.forEach((ds) => {
+        const gp = ds?.geometry?.position;
+        const gi = ds?.geometry?.index;
+        if (!gp?.data || !gp?.dtype) { return; }
+        const pos = fromBin(gp.data, gp.dtype);
+        const idx = (gi?.data && gi?.dtype) ? fromBin(gi.data, gi.dtype) : new Uint32Array();
+        ds.geometry = {
+          position: Array.from(pos),
+          index: Array.from(idx),
+        };
+      });
+    };
     const spaces = Array.isArray(state?.differenceSpaces) ? state.differenceSpaces : [];
-    spaces.forEach((ds) => {
-      const gp = ds?.geometry?.position;
-      const gi = ds?.geometry?.index;
-      if (!gp?.data || !gp?.dtype) { return; }
-      const pos = fromBin(gp.data, gp.dtype);
-      const idx = (gi?.data && gi?.dtype) ? fromBin(gi.data, gi.dtype) : new Uint32Array();
-      ds.geometry = {
-        position: Array.from(pos),
-        index: Array.from(idx),
-      };
-    });
+    const areaSpaces = Array.isArray(state?.areaSpaces) ? state.areaSpaces : [];
+    unpackSpaces(spaces);
+    unpackSpaces(areaSpaces);
     return state;
   }
 

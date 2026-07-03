@@ -75,6 +75,64 @@ function alignRootVisualCenterToOrigin(root) {
   root.updateMatrixWorld(true);
 }
 
+function isEmissionNamedCityTarget(node, mat) {
+  const includesEmission = (value) => String(value || '').toLowerCase().includes('emission');
+  if (includesEmission(node?.name) || includesEmission(node?.userData?.name) || includesEmission(mat?.name)) {
+    return true;
+  }
+  let parent = node?.parent || null;
+  while (parent) {
+    if (includesEmission(parent.name) || includesEmission(parent?.userData?.name)) {
+      return true;
+    }
+    parent = parent.parent || null;
+  }
+  return false;
+}
+
+function toCityEmissionBasicMaterial(mat) {
+  if (!mat) { return mat; }
+  const hasEmissiveColor = Boolean(mat.emissive && typeof mat.emissive.getHex === 'function' && mat.emissive.getHex() !== 0x000000);
+  const sourceMap = mat.emissiveMap || mat.map || null;
+  const sourceColor = hasEmissiveColor
+    ? mat.emissive.clone()
+    : (mat.color ? mat.color.clone() : new THREE.Color(0xffffff));
+  const next = mat.isMeshBasicMaterial
+    ? (mat.clone ? mat.clone() : mat)
+    : new THREE.MeshBasicMaterial({
+      map: sourceMap,
+      color: sourceColor,
+      transparent: Boolean(mat.transparent),
+      opacity: typeof mat.opacity === 'number' ? mat.opacity : 1,
+      side: mat.side,
+      alphaTest: typeof mat.alphaTest === 'number' ? mat.alphaTest : 0,
+    });
+  next.name = mat.name || next.name;
+  next.transparent = Boolean(mat.transparent);
+  next.opacity = typeof mat.opacity === 'number' ? mat.opacity : 1;
+  next.side = mat.side;
+  next.alphaTest = typeof mat.alphaTest === 'number' ? mat.alphaTest : 0;
+  next.depthTest = typeof mat.depthTest === 'boolean' ? mat.depthTest : true;
+  next.depthWrite = typeof mat.depthWrite === 'boolean' ? mat.depthWrite : true;
+  next.needsUpdate = true;
+  return next;
+}
+
+function disableEnvMapInfluenceForEmissionNamedCityMaterials(root) {
+  root?.traverse?.((node) => {
+    if (!node?.isMesh || !node.material) { return; }
+    if (Array.isArray(node.material)) {
+      node.material = node.material.map((mat) => (
+        isEmissionNamedCityTarget(node, mat) ? toCityEmissionBasicMaterial(mat) : mat
+      ));
+      return;
+    }
+    if (isEmissionNamedCityTarget(node, node.material)) {
+      node.material = toCityEmissionBasicMaterial(node.material);
+    }
+  });
+}
+
 if (onlyRailAndGround) {
   // create モード用の都市モデルだけは利用できるようにする
   const cityLoader = new GLTFLoader();
@@ -86,6 +144,7 @@ if (onlyRailAndGround) {
     (gltf) => {
       const root = gltf.scene || gltf.scenes?.[0];
       if (!root) { return; }
+      disableEnvMapInfluenceForEmissionNamedCityMaterials(root);
       root.rotation.y = 0;
       const currentY = root.position.y;
       root.position.set(0, currentY, 0);
@@ -184,6 +243,9 @@ async function loadModelToScene(modelUrl, options = {}, adjustment=true, sinkans
       (gltf) => {
         const root = gltf.scene || gltf.scenes[0];
         if (!root) return reject(new Error('glTF にシーンがありません'));
+        if (adjustment) {
+          disableEnvMapInfluenceForEmissionNamedCityMaterials(root);
+        }
 
         // 1) マテリアル側に環境マップをセット（PBRの反射を有効化）
         root.traverse((node) => {

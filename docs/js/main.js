@@ -16,10 +16,13 @@ let text = ''
 
 let topNoticeEl = null;
 let topNoticeHideTimer = null;
+let isNight = false;
 
 const CONSTRUCTION_FIXED_ENV_MAP_PATH = 'textures/ct.jpg';
 const DAY_SCENE_ENV_MAP_PATH = 'textures/sky.jpg';
-const NIGHT_SCENE_ENV_MAP_PATH = 'textures/moonless_golf.jpg';
+const NIGHT_SCENE_ENV_MAP_PATH = 'textures/686b2ce5eda76.jpg';
+const DAY_WORLD_BACKGROUND_PATH = DAY_SCENE_ENV_MAP_PATH;
+const NIGHT_WORLD_BACKGROUND_PATH = 'textures/images.png';
 const DAY_TRAIN_ENV_MAP_PATH = 'textures/skyy.jpg';
 const NIGHT_TRAIN_ENV_MAP_PATH = 'textures/shanghai_bund_4k.jpg';
 
@@ -554,7 +557,66 @@ function applyConstructionFixedEnvMapToMaterial(mat) {
   }
 }
 
+function isEmissionNamedCityTarget(node, mat) {
+  const includesEmission = (value) => String(value || '').toLowerCase().includes('emission');
+  if (includesEmission(node?.name) || includesEmission(node?.userData?.name) || includesEmission(mat?.name)) {
+    return true;
+  }
+  let parent = node?.parent || null;
+  while (parent) {
+    if (includesEmission(parent.name) || includesEmission(parent?.userData?.name)) {
+      return true;
+    }
+    parent = parent.parent || null;
+  }
+  return false;
+}
+
+function toCityEmissionBasicMaterial(mat) {
+  if (!mat) { return mat; }
+  const hasEmissiveColor = Boolean(mat.emissive && typeof mat.emissive.getHex === 'function' && mat.emissive.getHex() !== 0x000000);
+  const sourceMap = mat.emissiveMap || mat.map || null;
+  const sourceColor = hasEmissiveColor
+    ? mat.emissive.clone()
+    : (mat.color ? mat.color.clone() : new THREE.Color(0xffffff));
+  const next = mat.isMeshBasicMaterial
+    ? (mat.clone ? mat.clone() : mat)
+    : new THREE.MeshBasicMaterial({
+      map: sourceMap,
+      color: sourceColor,
+      transparent: Boolean(mat.transparent),
+      opacity: typeof mat.opacity === 'number' ? mat.opacity : 1,
+      side: mat.side,
+      alphaTest: typeof mat.alphaTest === 'number' ? mat.alphaTest : 0,
+    });
+  next.name = mat.name || next.name;
+  next.transparent = Boolean(mat.transparent);
+  next.opacity = typeof mat.opacity === 'number' ? mat.opacity : 1;
+  next.side = mat.side;
+  next.alphaTest = typeof mat.alphaTest === 'number' ? mat.alphaTest : 0;
+  next.depthTest = typeof mat.depthTest === 'boolean' ? mat.depthTest : true;
+  next.depthWrite = typeof mat.depthWrite === 'boolean' ? mat.depthWrite : true;
+  next.needsUpdate = true;
+  return next;
+}
+
+function disableEnvMapInfluenceForEmissionNamedCityMaterials(root) {
+  root?.traverse?.((node) => {
+    if (!node?.isMesh || !node.material) { return; }
+    if (Array.isArray(node.material)) {
+      node.material = node.material.map((mat) => (
+        isEmissionNamedCityTarget(node, mat) ? toCityEmissionBasicMaterial(mat) : mat
+      ));
+      return;
+    }
+    if (isEmissionNamedCityTarget(node, node.material)) {
+      node.material = toCityEmissionBasicMaterial(node.material);
+    }
+  });
+}
+
 const canvas = document.getElementById('three-canvas');
+const isRuntimeMinimalPage = document.body.classList.contains('runtime-minimal');
 const THUMBNAIL_CAPTURE_MODE = String(new URLSearchParams(window.location.search).get('thumbnail_mode') || '').trim() === '1';
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -568,8 +630,8 @@ const PERFORMANCE_QUALITY_OPTIONS = {
   medium: { label: '標準', pixelRatioScale: 1.0 },
   high: { label: '高', pixelRatioScale: 1.5 },
 };
-const PERFORMANCE_DRAW_DISTANCE_MIN = 80;
-const PERFORMANCE_DRAW_DISTANCE_MAX = 500;
+const PERFORMANCE_DRAW_DISTANCE_MIN = 10;
+const PERFORMANCE_DRAW_DISTANCE_MAX = 300;
 const PERFORMANCE_DRAW_DISTANCE_STEP = 10;
 function loadPerformanceSettings() {
   const fallback = { quality: 'medium', drawDistance: 200 };
@@ -592,19 +654,30 @@ function loadPerformanceSettings() {
 }
 const performanceSettings = loadPerformanceSettings();
 function loadSceneVisibilitySettings() {
-  const fallback = { showTrains: true, showCityModel: true, showDifferenceLineOverlapPreview: false };
+  const fallback = {
+    showTrains: true,
+    showCityModel: true,
+    showDifferenceLineOverlapPreview: false,
+    showDifferenceSpaceLines: true,
+    ubldOpacity: 100,
+  };
   try {
     const raw = window.localStorage.getItem(SCENE_VISIBILITY_SETTINGS_STORAGE_KEY);
-    if (!raw) { return fallback; }
+    if (!raw) { return { ...fallback }; }
     const parsed = JSON.parse(raw);
+    const ubldOpacity = Number(parsed?.ubldOpacity);
     return {
       showTrains: parsed?.showTrains !== false,
       showCityModel: parsed?.showCityModel !== false,
       showDifferenceLineOverlapPreview: false,
+      showDifferenceSpaceLines: parsed?.showDifferenceSpaceLines !== false,
+      ubldOpacity: Number.isFinite(ubldOpacity)
+        ? Math.min(100, Math.max(0, ubldOpacity))
+        : fallback.ubldOpacity,
     };
   } catch (err) {
     console.warn('failed to load scene visibility settings', err);
-    return fallback;
+    return { ...fallback };
   }
 }
 const sceneVisibilitySettings = loadSceneVisibilitySettings();
@@ -667,7 +740,7 @@ function markRuntimeMapStructurePostProcessReady(reason = 'unknown') {
   }
   if (lastLoadedStandaloneDifferencePayload && countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload) > 0) {
     try {
-      restoreDifferenceSpacesFromPayload(lastLoadedStandaloneDifferencePayload, { clearExisting: false, applyToCity: false });
+      restoreDifferenceSpacesFromPayload(lastLoadedStandaloneDifferencePayload, { clearExisting: false, applyToCity: false, includeRailOperations: false });
       console.info('[difference][postprocess] restored standalone spaces after structure post process', {
         reason,
         missingStandaloneSpaceCountAfter: countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload),
@@ -894,6 +967,14 @@ const threeUi = document.getElementById('three-ui');
   const rotationPanel = document.getElementById('rotation-panel');
   const rotationPanelTitle = document.getElementById('rotation-panel-title');
   const groupPointEditModePanel = document.getElementById('group-point-edit-mode-panel');
+  const differenceAreaSelectionPanel = document.getElementById('difference-area-selection-panel');
+  const differenceAreaSelectSingleBtn = document.getElementById('difference-area-select-single');
+  const differenceAreaSelectBoxBtn = document.getElementById('difference-area-select-box');
+  const differenceAreaMoveModeRow = document.getElementById('difference-area-move-mode-row');
+  const differenceAreaMoveFaceBtn = document.getElementById('difference-area-move-face');
+  const differenceAreaMovePlaneBtn = document.getElementById('difference-area-move-plane');
+  const differenceAreaMoveHeightBtn = document.getElementById('difference-area-move-height');
+  const differenceAreaSelectionBox = document.getElementById('difference-area-selection-box');
   const normalGroupPointPartialBtn = document.getElementById('normal-group-point-partial');
   const normalGroupPointGroupBtn = document.getElementById('normal-group-point-group');
   const copiedGroupPointDetachBtn = document.getElementById('copied-group-point-detach');
@@ -946,9 +1027,7 @@ const threeUi = document.getElementById('three-ui');
   let differenceLineSelect = document.getElementById('difference-line');
   const differenceLineHeightInput = document.getElementById('difference-line-height');
   const differenceLineHeightApplyButton = document.getElementById('difference-line-height-apply');
-  const differenceBodySelectButton = document.getElementById('difference-body-select');
-  const differenceMoveXZButton = document.getElementById('difference-move-xz');
-  const differenceMoveYButton = document.getElementById('difference-move-y');
+  let differenceCopyButton = document.getElementById('difference-copy-button');
   const differenceAutoMergeToggleButton = document.getElementById('difference-auto-merge-toggle');
   const differenceUnifyButton = document.getElementById('difference-unify-button');
   let differenceResetBeforeUnifyButton = document.getElementById('difference-reset-before-unify-button');
@@ -967,6 +1046,13 @@ const threeUi = document.getElementById('three-ui');
   let differenceFacePanel = null;
   let differenceFaceCheckboxes = null;
   let differenceFaceSummary = null;
+  let areaStructurePanel = null;
+  let areaStructureNameInput = null;
+  let areaStructureRenameButton = null;
+  let areaStructureHideButton = null;
+  let areaStructureShowButton = null;
+  let areaStructureShowAllButton = null;
+  let areaStructureSummary = null;
   let differenceTexturePresetSelect = null;
   let differenceTexturePathInput = null;
   let differenceTextureRepeatXInput = null;
@@ -975,9 +1061,16 @@ const threeUi = document.getElementById('three-ui');
   let differenceTextureSelectionInfo = null;
   const mapLoadStatus = document.getElementById('map-load-status');
   const toggleGroundOpacityButton = document.getElementById('toggle-ground-opacity');
+  const toggleUbldOpacityButton = document.getElementById('toggle-ubld-opacity');
   const toggleTrainPanelButton = document.getElementById('toggle-train-panel');
+  const toggleAreaVisibilityPanelButton = document.getElementById('toggle-area-visibility-panel');
   const createModeUtilityButtons = document.getElementById('create-mode-utility-buttons');
   const trainPanel = document.getElementById('train-panel');
+  const areaVisibilityPanel = document.getElementById('area-visibility-panel');
+  const areaVisibilityList = document.getElementById('area-visibility-list');
+  const areaVisibilityRefreshButton = document.getElementById('area-visibility-refresh');
+  const areaVisibilityShowAllButton = document.getElementById('area-visibility-show-all');
+  const areaVisibilityStatus = document.getElementById('area-visibility-status');
   const trainConfigList = document.getElementById('train-config-list');
   const trainAddButton = document.getElementById('train-add-button');
   const trainApplyButton = document.getElementById('train-apply-button');
@@ -1386,6 +1479,9 @@ const threeUi = document.getElementById('three-ui');
       differencePanel,
       differenceTargetPanel,
       differenceFacePanel,
+      areaStructurePanel,
+      differenceAreaSelectionPanel,
+      areaVisibilityPanel,
       constructionCategoryPanel,
       railConstructionPanel,
       structureGenerationListPanel,
@@ -1428,7 +1524,7 @@ const threeUi = document.getElementById('three-ui');
     }
 
     const targets = Array.from(document.querySelectorAll(
-      '#speed-up, #speed-down, #btn-up, #btn-down, #controller-area, #controller, #log, #create-guide-y-button, #toggle-daynight, #difference-body-select, #difference-move-xz, #difference-move-y, #difference-auto-merge-toggle, #scene-toggle-btn, #scene-panel, #performance-toggle-btn, #performance-panel, #UiGroup > button:not([data-ui-root-level=\"1\"]), #frontViewButtons > button, #save-buttons > button, #show-instructions-btn'
+      '#speed-up, #speed-down, #btn-up, #btn-down, #controller-area, #controller, #log, #create-guide-y-button, #toggle-daynight, #difference-auto-merge-toggle, #difference-copy-button, #scene-toggle-btn, #scene-panel, #performance-toggle-btn, #performance-panel, #UiGroup > button:not([data-ui-root-level=\"1\"]), #frontViewButtons > button, #save-buttons > button, #show-instructions-btn'
     ));
     targets.forEach((el) => {
       if (!el) { return; }
@@ -1616,9 +1712,84 @@ let differenceSpaceTransformMode = 'none';
     return n.toFixed(3);
   }
 
+  function isRailCoordinatePanelContext() {
+    return editObject === 'RAIL' && objectEditMode === 'MOVE_EXISTING';
+  }
+
+  function getSelectedRailCoordinateTarget() {
+    if (selectedRailPoint?.trackName && Number.isInteger(selectedRailPoint?.pointIndex)) {
+      const selectedMesh = targetObjects.find((mesh) => (
+        isRailPointPickMesh(mesh)
+        && String(mesh.userData.trackName || '').trim() === String(selectedRailPoint.trackName || '').trim()
+        && Number(mesh.userData.pointIndex) === Number(selectedRailPoint.pointIndex)
+      )) || null;
+      if (selectedMesh) { return selectedMesh; }
+    }
+    return isRailPointPickMesh(choice_object) ? choice_object : null;
+  }
+
+  function setRailCoordinatePanelInputsEnabled(enabled) {
+    [
+      rotationInputX,
+      rotationInputY,
+      rotationInputZ,
+      rotationApplyBtn,
+    ].forEach((el) => {
+      if (!el) { return; }
+      el.disabled = !enabled;
+      el.style.opacity = enabled ? '' : '0.55';
+      el.style.cursor = enabled ? '' : 'not-allowed';
+    });
+  }
+
+  function updateRailCoordinatePanelUI({ clearInputs = false } = {}) {
+    if (!isRailCoordinatePanelContext()) { return; }
+    setRotationPanelMode('rail_move_point');
+    setRotationPanelVisible(true);
+    const target = getSelectedRailCoordinateTarget();
+    const hasTarget = Boolean(target?.position?.isVector3);
+    setRailCoordinatePanelInputsEnabled(hasTarget);
+    if (rotationInputX) {
+      if (clearInputs) { rotationInputX.value = ''; }
+      rotationInputX.placeholder = hasTarget ? formatRailCoord(target.position.x) : '未選択';
+    }
+    if (rotationInputY) {
+      if (clearInputs) { rotationInputY.value = ''; }
+      rotationInputY.placeholder = hasTarget ? formatRailCoord(target.position.y) : '未選択';
+    }
+    if (rotationInputZ) {
+      if (clearInputs) { rotationInputZ.value = ''; }
+      rotationInputZ.placeholder = hasTarget ? formatRailCoord(target.position.z) : '未選択';
+    }
+    if (rotationSelectionInfo) {
+      if (!hasTarget) {
+        rotationSelectionInfo.textContent = [
+          '選択点: なし',
+          'レール点をクリックして選択してください。',
+          '入力: 数値=絶対座標 / +=数値=相対移動',
+        ].join('\n');
+      } else {
+        const trackName = String(target.userData?.trackName || '').trim() || 'unknown';
+        const pointIndex = Number(target.userData?.pointIndex);
+        rotationSelectionInfo.textContent = [
+          '選択点: 1',
+          `路線: ${trackName}[${pointIndex}]`,
+          `x: ${formatRailCoord(target.position.x)}`,
+          `y: ${formatRailCoord(target.position.y)}`,
+          `z: ${formatRailCoord(target.position.z)}`,
+          '入力: 数値=絶対座標 / +=数値=相対移動',
+        ].join('\n');
+      }
+    }
+    syncRotationInputGhostHints();
+  }
+
   function updateRailSelectionStatus() {
     const el = getRailSelectionStatusElement();
-    if (!el) { return; }
+    if (!el) {
+      updateRailCoordinatePanelUI();
+      return;
+    }
     const railEditActive = editObject === 'RAIL'
       && (objectEditMode === 'MOVE_EXISTING' || objectEditMode === ROTATE_MODE || objectEditMode === 'CREATE_NEW');
     if (!railEditActive) {
@@ -1689,6 +1860,7 @@ let differenceSpaceTransformMode = 'none';
     }
     el.textContent = lines.join('\n');
     el.style.display = 'block';
+    updateRailCoordinatePanelUI();
   }
 
   function blockManualDioramaSpaceMode() {
@@ -5364,17 +5536,39 @@ let differenceSpaceTransformMode = 'none';
         updateDifferenceStatus(`tunnel_circle を Difference空間へ追加: ${trackLabel}`);
         return true;
       }
-      const built = TSys.buildStructureFromPins(kind, pins, railTrackCurveMap, {
-        innerWidth: 1.4,
-        innerHeight: 1.4,
-        wallThickness: 0.15,
-        segmentSpacing: 1.2,
-        yOffset: kind === 'tunnel_circle' ? -1.0 : -0.1,
-        sideClearance: kind === 'tunnel_rect' ? 1.4 : 1.2,
-        innerRadius: 1.6,
-        color: 0x8b8f94,
+      const tunnelSpace = addDifferenceTunnelRectSpaceFromTrackCurves(selectedTrackCurves, {
+        innerWidth: 0.3,
+        innerHeight: 2,
+        sideClearance: 0.7,
+        sampleStepMeters: 1.2,
       });
-      if (!built) { return false; }
+      if (!tunnelSpace?.mesh) {
+        if (railConstructionStatus) {
+          railConstructionStatus.textContent = 'tunnel_rect: Difference空間の生成に失敗しました。';
+        }
+        return false;
+      }
+      applyPinGenerationRuntimeNameToMeshes([tunnelSpace.mesh], runtimeId, 'tunnel_rect');
+      applyOwnerPinIdsToMeshes([tunnelSpace.mesh], pinsForLink);
+      lastRailConstructionCreatedObjects = [tunnelSpace.mesh];
+      recordStructureGenerationRun({
+        category: kind,
+        pins,
+        ownerPinIds: pinsForLink,
+        runtimeId,
+        params: {
+          output: 'difference_space_rect',
+          trackNames: tunnelSpace.trackNames,
+          width: tunnelSpace.width,
+          height: tunnelSpace.height,
+        },
+      });
+      const trackLabel = tunnelSpace.trackNames.length > 0 ? tunnelSpace.trackNames.join(', ') : 'n/a';
+      if (railConstructionStatus) {
+        railConstructionStatus.textContent = `生成完了: tunnel_rect / Difference空間へ追加 / tracks=${trackLabel} / size=${tunnelSpace.width.toFixed(2)}x${tunnelSpace.height.toFixed(2)}`;
+      }
+      updateDifferenceStatus(`tunnel_rect を Difference空間へ追加: ${trackLabel}`);
+      return true;
     } else if (kind === 'platform') {
       const runRailPlatformConstruction = () => {
         const selectedTrackCurves = providedPins.length > 0
@@ -5490,10 +5684,10 @@ let differenceSpaceTransformMode = 'none';
   }
 
   // 初期表示: プレビューでは three-ui を隠してプレビュー用パネルを表示
-  if (threeUi) {
+  if (threeUi && !isRuntimeMinimalPage) {
     try { threeUi.style.display = 'none'; } catch (e) {}
   }
-  if (previewFeature) {
+  if (previewFeature && !isRuntimeMinimalPage) {
     try { previewFeature.style.display = 'block'; } catch (e) {}
   }
   if (differenceShapeSelect) {
@@ -5557,6 +5751,14 @@ let differenceSpaceTransformMode = 'none';
       refreshDifferenceLineOnlyPreview();
     }
   }
+  if (differenceCopyButton) {
+    differenceCopyButton.addEventListener('click', () => {
+      const duplicatedMesh = duplicateSelectedDifferenceSpace();
+      if (!duplicatedMesh) { return; }
+      UIevent('move_space', 'active');
+    });
+    updateDifferenceCopyButtonState();
+  }
   if (differenceUnifyButton) {
     if (!differenceResetBeforeUnifyButton && differenceUnifyButton.parentElement) {
       differenceResetBeforeUnifyButton = document.createElement('button');
@@ -5601,33 +5803,6 @@ let differenceSpaceTransformMode = 'none';
           ? 'view[preview]: 黄を表示 / 橙を削除 / 赤を非表示'
           : 'view[diff]: 黄・橙・赤の判定表示';
       }
-    });
-  }
-  if (differenceBodySelectButton) {
-    setDifferenceBodySelectButtonState(false);
-    differenceBodySelectButton.addEventListener('click', () => {
-      const nextActive = !differenceBodySelectModeActive;
-      UIevent('body_select', nextActive ? 'active' : 'inactive');
-    });
-  }
-  if (differenceMoveXZButton) {
-    updateDifferenceMoveAxisButtons();
-    differenceMoveXZButton.addEventListener('click', () => {
-      const nextActive = !isDifferenceMoveAxisButtonActive(false);
-      if (isDifferenceMoveAxisButtonActive(true)) {
-        UIevent('y_sf', 'inactive');
-      }
-      UIevent('x_z_sf', nextActive ? 'active' : 'inactive');
-    });
-  }
-  if (differenceMoveYButton) {
-    updateDifferenceMoveAxisButtons();
-    differenceMoveYButton.addEventListener('click', () => {
-      const nextActive = !isDifferenceMoveAxisButtonActive(true);
-      if (isDifferenceMoveAxisButtonActive(false)) {
-        UIevent('x_z_sf', 'inactive');
-      }
-      UIevent('y_sf', nextActive ? 'active' : 'inactive');
     });
   }
   if (differenceAutoMergeToggleButton) {
@@ -5952,6 +6127,7 @@ let differenceSpaceTransformMode = 'none';
 
   function setRotationPanelMode(mode = 'rotation') {
     const isMovePoint = mode === 'move_point';
+    const isRailMovePoint = mode === 'rail_move_point';
     const isScalePoint = mode === 'scale_point';
     const isMovePointRotation = mode === 'move_point_rotation';
     const isDecorationRotation = mode === 'rotation_decoration';
@@ -5962,19 +6138,24 @@ let differenceSpaceTransformMode = 'none';
     if (rotationPanelTitle) {
       rotationPanelTitle.textContent = isMovePoint
         ? 'Move Point'
+        : (isRailMovePoint
+          ? 'Rail Point'
         : (isScalePoint
           ? 'Scale Point'
           : (isMovePointRotation
             ? 'Point Rotate'
-            : (isDecorationRotation ? 'Decoration Rotate' : (isCopyMode ? 'Copy' : (isStyleMode ? 'Style' : (isDeleteMode ? 'Delete' : (isTextureMode ? 'Difference Texture' : 'Rotation')))))));
+            : (isDecorationRotation ? 'Decoration Rotate' : (isCopyMode ? 'Copy' : (isStyleMode ? 'Style' : (isDeleteMode ? 'Delete' : (isTextureMode ? 'Difference Texture' : 'Rotation'))))))));
     }
     const axisSuffix = isMovePoint
       ? (movePointCoordinateMode === 'grid' ? ' (grid)' : ' (world)')
+      : isRailMovePoint
+      ? ' (world)'
       : isScalePoint
       ? ' (scale)'
       : ' (deg)';
     const showSetY = editObject === 'STEEL_FRAME'
       && !isMovePoint
+      && !isRailMovePoint
       && !isScalePoint
       && !isMovePointRotation
       && !isDecorationRotation
@@ -6007,7 +6188,7 @@ let differenceSpaceTransformMode = 'none';
     if (rotationApplyBtn) {
       rotationApplyBtn.textContent = isStyleMode
         ? 'スタイル適用'
-        : (isCopyMode ? 'コピー実行' : (isDeleteMode ? '削除実行' : (isMovePoint ? '座標適用' : (isScalePoint ? 'スケール適用' : '適用'))));
+        : (isCopyMode ? 'コピー実行' : (isDeleteMode ? '削除実行' : ((isMovePoint || isRailMovePoint) ? '座標適用' : (isScalePoint ? 'スケール適用' : '適用'))));
       rotationApplyBtn.style.display = isTextureMode ? 'none' : '';
       if (!isDeleteMode) {
         rotationApplyBtn.disabled = false;
@@ -9752,6 +9933,8 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
     if (visible) {
       syncRotationInputGhostHints();
     }
+    updateDifferenceCopyButtonState();
+    updateDifferenceAreaSelectionPanel();
   }
 
   function updateGroupPointEditModeButtons() {
@@ -9822,10 +10005,94 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
   }
 
   function setDifferenceBodySelectButtonState(active) {
-    if (!differenceBodySelectButton) { return; }
-    differenceBodySelectButton.style.background = active ? '#2b4f8a' : '';
-    differenceBodySelectButton.style.color = active ? '#ffffff' : '';
     updateDifferenceMoveAxisButtons();
+  }
+
+  function isDifferenceAreaSelectionPanelContext() {
+    return editObject === 'DIFFERENCE_SPACE'
+      && ['move', 'rotation', 'scale'].includes(differenceSpaceTransformMode);
+  }
+
+  function isDifferenceAreaMoveModeContext() {
+    try {
+      return editObject === 'DIFFERENCE_SPACE'
+        && differenceSpaceTransformMode === 'move'
+        && objectEditMode === 'CONSTRUCT';
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function updateDifferenceAreaSelectionButtons() {
+    let currentMoveMode = 'face';
+    let currentAxisMoveDragMode = 'none';
+    try {
+      currentMoveMode = differenceMoveMode;
+      currentAxisMoveDragMode = differenceAxisMoveDragMode;
+    } catch (_err) {
+      currentMoveMode = 'face';
+      currentAxisMoveDragMode = 'none';
+    }
+    const setButtonActive = (btn, active, colors) => {
+      if (!btn) { return; }
+      btn.style.background = active ? colors.activeBg : colors.baseBg;
+      btn.style.borderColor = active ? colors.activeBorder : colors.baseBorder;
+      btn.style.color = active ? colors.activeText : colors.baseText;
+      btn.style.fontWeight = active ? '700' : '500';
+    };
+    setButtonActive(differenceAreaSelectSingleBtn, !differenceBodySelectModeActive || differenceBodySelectionMode === 'single', {
+      activeBg: '#e6f1ff',
+      activeBorder: '#2f6dc2',
+      activeText: '#123564',
+      baseBg: '#ffffff',
+      baseBorder: '#c5d1df',
+      baseText: '#415167',
+    });
+    setButtonActive(differenceAreaSelectBoxBtn, differenceBodySelectionMode === 'box', {
+      activeBg: '#fff3e4',
+      activeBorder: '#d98a28',
+      activeText: '#6b3c00',
+      baseBg: '#ffffff',
+      baseBorder: '#d7cfbf',
+      baseText: '#5b564e',
+    });
+    setButtonActive(differenceAreaMoveFaceBtn, currentMoveMode === 'face' && currentAxisMoveDragMode === 'none', {
+      activeBg: '#edf6ff',
+      activeBorder: '#5f93d6',
+      activeText: '#173a69',
+      baseBg: '#ffffff',
+      baseBorder: '#c5d1df',
+      baseText: '#415167',
+    });
+    setButtonActive(differenceAreaMovePlaneBtn, currentMoveMode === 'plane', {
+      activeBg: '#e9fff4',
+      activeBorder: '#4ba56f',
+      activeText: '#1a613b',
+      baseBg: '#ffffff',
+      baseBorder: '#c5d1df',
+      baseText: '#415167',
+    });
+    setButtonActive(differenceAreaMoveHeightBtn, currentMoveMode === 'height', {
+      activeBg: '#fff3e4',
+      activeBorder: '#d98a28',
+      activeText: '#6b3c00',
+      baseBg: '#ffffff',
+      baseBorder: '#c5d1df',
+      baseText: '#415167',
+    });
+  }
+
+  function updateDifferenceAreaSelectionPanel() {
+    if (!differenceAreaSelectionPanel) { return; }
+    const visible = isDifferenceAreaSelectionPanelContext();
+    differenceAreaSelectionPanel.style.display = visible ? 'block' : 'none';
+    if (differenceAreaMoveModeRow) {
+      differenceAreaMoveModeRow.hidden = !isDifferenceAreaMoveModeContext();
+    }
+    updateDifferenceAreaSelectionButtons();
+    if (visible) {
+      scheduleClampUiPanels();
+    }
   }
 
   function isDifferenceMoveAxisButtonActive(axisY = false) {
@@ -9843,19 +10110,7 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
   }
 
   function updateDifferenceMoveAxisButtons() {
-    const visible = (
-      editObject === 'DIFFERENCE_SPACE'
-      && objectEditMode === 'CONSTRUCT'
-      && differenceSpaceTransformMode === 'move'
-    );
-    if (differenceMoveXZButton) {
-      differenceMoveXZButton.style.display = visible ? 'block' : 'none';
-      setDifferenceMoveAxisButtonState(differenceMoveXZButton, visible && isDifferenceMoveAxisButtonActive(false));
-    }
-    if (differenceMoveYButton) {
-      differenceMoveYButton.style.display = visible ? 'block' : 'none';
-      setDifferenceMoveAxisButtonState(differenceMoveYButton, visible && isDifferenceMoveAxisButtonActive(true));
-    }
+    updateDifferenceAreaSelectionButtons();
   }
 
   function isDifferenceAxisMoveMode() {
@@ -9924,6 +10179,24 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
   });
   copiedGroupPointGroupBtn?.addEventListener('click', () => {
     setCopiedStructureGroupPointEditMode('group');
+  });
+  differenceAreaSelectSingleBtn?.addEventListener('click', () => {
+    setDifferenceBodySelectionMode(false);
+  });
+  differenceAreaSelectBoxBtn?.addEventListener('click', () => {
+    setDifferenceBodySelectionMode(true, 'box');
+  });
+  differenceAreaMoveFaceBtn?.addEventListener('click', () => {
+    if (!isDifferenceAreaMoveModeContext()) { return; }
+    UIevent('face_move', 'active');
+  });
+  differenceAreaMovePlaneBtn?.addEventListener('click', () => {
+    if (!isDifferenceAreaMoveModeContext()) { return; }
+    UIevent('plane_move', 'active');
+  });
+  differenceAreaMoveHeightBtn?.addEventListener('click', () => {
+    if (!isDifferenceAreaMoveModeContext()) { return; }
+    UIevent('height_move', 'active');
   });
 
   function getAxisDisplayForTargets(targets, axis) {
@@ -10192,15 +10465,19 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       .filter((item) => vecMoved(item.before, item.after));
     if (movedItems.length > 0) {
       if (differenceContext) {
-        if (movedPoints.length > 0) {
+        const simpleMoveMode = isDifferenceSimpleMoveModeActive();
+        if (!simpleMoveMode && movedPoints.length > 0) {
           propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
         }
-        const constrained = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-        const finalDirty = constrained || dirtyMeshes;
-        finalDirty.forEach((mesh) => syncDifferenceGeometryFromControlPoints(mesh));
-        autoMergeNearbyDifferencePoints(movedPoints);
-        mergeOverlappedBoundaryControlPoints();
-        refreshDifferencePreview();
+        if (!simpleMoveMode) {
+          applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+        }
+        dirtyMeshes.forEach((mesh) => syncDifferenceGeometryFromControlPoints(mesh));
+        if (!simpleMoveMode) {
+          autoMergeNearbyDifferencePoints(movedPoints);
+          mergeOverlappedBoundaryControlPoints();
+        }
+        refreshDifferencePreviewForTransformInteraction();
         refreshDifferenceSelectedEdgeHighlights();
         commitDifferenceHistoryIfNeeded();
       } else {
@@ -10300,20 +10577,25 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       .filter((item) => vecMoved(item.before, item.after));
     if (movedItems.length > 0) {
       if (differenceContext) {
-        if (movedPoints.length > 0) {
+        const simpleMoveMode = isDifferenceSimpleMoveModeActive();
+        if (!simpleMoveMode && movedPoints.length > 0) {
           propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
         }
-        for (let i = 0; i < 3; i += 1) {
-          const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-          if (moved < 1) { break; }
+        if (!simpleMoveMode) {
+          for (let i = 0; i < 3; i += 1) {
+            const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+            if (moved < 1) { break; }
+          }
         }
         dirtyMeshes.forEach((mesh) => {
           syncDifferenceGeometryFromControlPoints(mesh);
           updateDifferenceControlPointMarkerTransform(mesh);
         });
-        autoMergeNearbyDifferencePoints(movedPoints);
-        mergeOverlappedBoundaryControlPoints();
-        refreshDifferencePreview();
+        if (!simpleMoveMode) {
+          autoMergeNearbyDifferencePoints(movedPoints);
+          mergeOverlappedBoundaryControlPoints();
+        }
+        refreshDifferencePreviewForTransformInteraction();
         refreshDifferenceSelectedEdgeHighlights();
         commitDifferenceHistoryIfNeeded();
       } else {
@@ -10329,6 +10611,55 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       drawingObject(targets);
     }
     refreshPointEditPanelUI({ clearInputs: true });
+  }
+
+  function applyRailCoordinateFromPanel() {
+    const target = getSelectedRailCoordinateTarget();
+    if (!target?.position?.isVector3) {
+      updateRailCoordinatePanelUI({ clearInputs: false });
+      if (rotationSelectionInfo) {
+        rotationSelectionInfo.textContent = 'レール点が未選択です。点をクリックしてから入力してください。';
+      }
+      return;
+    }
+
+    const inputX = parseMovePointAxisInput(normalizeNumericInputText(rotationInputX?.value ?? ''));
+    const inputY = parseMovePointAxisInput(normalizeNumericInputText(rotationInputY?.value ?? ''));
+    const inputZ = parseMovePointAxisInput(normalizeNumericInputText(rotationInputZ?.value ?? ''));
+    const inputs = { x: inputX, y: inputY, z: inputZ };
+    const invalidAxis = Object.entries(inputs).find(([, parsed]) => parsed?.mode === 'invalid');
+    if (invalidAxis) {
+      const axis = invalidAxis[0].toUpperCase();
+      if (rotationSelectionInfo) {
+        rotationSelectionInfo.textContent = `${axis} の入力が不正です。数値 または +=数値 で入力してください。`;
+      }
+      return;
+    }
+    if (!inputX && !inputY && !inputZ) {
+      if (rotationSelectionInfo) {
+        rotationSelectionInfo.textContent = '入力が空です。数値 または +=数値 を入力してください。';
+      }
+      return;
+    }
+
+    const next = target.position.clone();
+    ['x', 'y', 'z'].forEach((axis) => {
+      const parsed = inputs[axis];
+      if (!parsed) { return; }
+      if (parsed.mode === 'delta') {
+        next[axis] += parsed.value;
+      } else if (parsed.mode === 'absolute') {
+        next[axis] = parsed.value;
+      }
+    });
+    target.position.copy(next);
+    selectedRailPoint = {
+      trackName: String(target.userData?.trackName || '').trim(),
+      pointIndex: Number(target.userData?.pointIndex),
+    };
+    updateRailPointFromMesh(target);
+    updateRailSelectionStatus();
+    updateRailCoordinatePanelUI({ clearInputs: true });
   }
 
   function applyRotationFromPanel() {
@@ -10363,6 +10694,10 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
       )
       && movePlaneMode !== 'change_angle') {
       applyMovePointFromPanel();
+      return;
+    }
+    if (editObject === 'RAIL' && objectEditMode === 'MOVE_EXISTING') {
+      applyRailCoordinateFromPanel();
       return;
     }
     if (editObject === 'RAIL'
@@ -11333,7 +11668,7 @@ function syncSavedRotationForActiveStructureGroup(panelAngles = null) {
     btn.addEventListener('touchstart', onActivate, { passive: false });
   });
 
-if (introWrapper) {
+if (introWrapper && !isRuntimeMinimalPage) {
   canvas.classList.add('intro-canvas');
   // 見た目の安定のため、introWrapper の実サイズに合わせてプレビュー幅を選ぶ
   const rect = introWrapper.getBoundingClientRect();
@@ -11348,6 +11683,7 @@ if (introWrapper) {
   // controller 初期位置更新
   try { updateCtrlPos(); } catch (e) {}
 } else {
+  canvas.classList.remove('intro-canvas');
   canvas.classList.add('full-canvas');
   renderer.setSize(window.innerWidth, window.innerHeight);
   try { renderer.setPixelRatio(getPerformancePixelRatio()); } catch (e) {}
@@ -11390,21 +11726,35 @@ pmremGenerator.compileEquirectangularShader();
 
 let envMap = null
 let envMapNight = null
+let worldBackgroundDay = null
+let worldBackgroundNight = null
 const loader = new THREE.TextureLoader();
-  loader.load(DAY_SCENE_ENV_MAP_PATH, (texture) => {
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    scene.background = texture;
-    scene.environment = texture;
-    envMap = texture;
-  });
+loader.load(DAY_SCENE_ENV_MAP_PATH, (texture) => {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  envMap = texture;
+  applySceneAppearance();
+});
 
 loader.load(NIGHT_SCENE_ENV_MAP_PATH, (texture_night) => {
   texture_night.mapping = THREE.EquirectangularReflectionMapping;
   texture_night.colorSpace = THREE.SRGBColorSpace;
-  // scene.background = texture_night;
-  // scene.environment = texture_night;
   envMapNight = texture_night ;
+  applySceneAppearance();
+});
+
+loader.load(DAY_WORLD_BACKGROUND_PATH, (texture) => {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  worldBackgroundDay = texture;
+  applySceneAppearance();
+});
+
+loader.load(NIGHT_WORLD_BACKGROUND_PATH, (texture) => {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  worldBackgroundNight = texture;
+  applySceneAppearance();
 });
 
 let ref_envMap = null
@@ -11415,6 +11765,25 @@ function getActiveTrainEnvMap() {
     return ref_envMapNight || envMapNight || scene.environment || null;
   }
   return ref_envMap || envMap || scene.environment || null;
+}
+
+function getActiveWorldBackground() {
+  if (isNight) {
+    return worldBackgroundNight || envMapNight || scene.background || null;
+  }
+  return worldBackgroundDay || envMap || scene.background || null;
+}
+
+function getActiveSceneEnvironment() {
+  if (isNight) {
+    return envMapNight || envMap || scene.environment || null;
+  }
+  return envMap || envMapNight || scene.environment || null;
+}
+
+function applySceneAppearance() {
+  scene.background = getActiveWorldBackground();
+  scene.environment = getActiveSceneEnvironment();
 }
 
 function syncTrainEnvMapReference() {
@@ -11454,13 +11823,7 @@ loader.load(NIGHT_TRAIN_ENV_MAP_PATH, (ref_night) => {
   }
 });
 
-// envMap = envMapNight
-
-scene.background = envMapNight;
-scene.environment = envMapNight;
-
-scene.background = envMap;
-scene.environment = envMap;
+applySceneAppearance();
 
 renderer.toneMappingExposure = 1;
 
@@ -11999,7 +12362,6 @@ const TSys = new TrainSystem(scene,dirLight);
 // scene.add(ambient);
 
 // --- 昼夜切替 ---
-let isNight = false;
 
 function TextureToggle(){
   syncTrainEnvMapReference();
@@ -12012,8 +12374,7 @@ function toggleDayNightMode() {
 
   if (isNight) {
     // 🌙 夜モード
-    scene.background = envMapNight;
-    scene.environment = envMapNight;
+    applySceneAppearance();
 
     setDirLightVisible(false);
     // ambient.visible = false;
@@ -12022,8 +12383,7 @@ function toggleDayNightMode() {
 
   } else {
     // ☀️ 昼モード
-    scene.background = envMap;
-    scene.environment = envMap;
+    applySceneAppearance();
 
     setDirLightVisible(true);
     // ambient.visible = true;
@@ -12124,9 +12484,13 @@ const scenePanelClose = document.getElementById('scene-panel-close');
 const sceneToggleTrainsButton = document.getElementById('scene-toggle-trains-btn');
 const sceneToggleCityButton = document.getElementById('scene-toggle-city-btn');
 const sceneToggleLineOverlapPreviewButton = document.getElementById('scene-toggle-line-overlap-preview-btn');
+const sceneToggleDifferenceSpaceLinesButton = document.getElementById('scene-toggle-difference-space-lines-btn');
 const sceneToggleTrainMotionButton = document.getElementById('scene-toggle-train-motion-btn');
+const sceneUbldOpacityRange = document.getElementById('scene-ubld-opacity-range');
+const sceneUbldOpacityValue = document.getElementById('scene-ubld-opacity-value');
 let manualTrainAnimationPaused = false;
 let mainRenderLoopRequestId = 0;
+let ubldOpacityButtonOverrideValue = null;
 
 function saveSceneVisibilitySettings() {
   try {
@@ -12153,7 +12517,22 @@ function updateScenePanelUi() {
   updateScenePanelToggleButton(sceneToggleTrainsButton, sceneVisibilitySettings.showTrains !== false);
   updateScenePanelToggleButton(sceneToggleCityButton, sceneVisibilitySettings.showCityModel !== false);
   updateScenePanelToggleButton(sceneToggleLineOverlapPreviewButton, sceneVisibilitySettings.showDifferenceLineOverlapPreview !== false);
+  updateScenePanelToggleButton(sceneToggleDifferenceSpaceLinesButton, sceneVisibilitySettings.showDifferenceSpaceLines !== false);
   updateScenePanelToggleButton(sceneToggleTrainMotionButton, !manualTrainAnimationPaused);
+  if (sceneUbldOpacityRange) {
+    sceneUbldOpacityRange.value = String(Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0)));
+  }
+  if (sceneUbldOpacityValue) {
+    sceneUbldOpacityValue.textContent = `${Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0))}`;
+  }
+}
+
+function getEffectiveUbldOpacitySetting() {
+  const sceneOpacity = Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0));
+  if (Number.isFinite(ubldOpacityButtonOverrideValue)) {
+    return Math.min(100, Math.max(0, Number(ubldOpacityButtonOverrideValue) || 0));
+  }
+  return sceneOpacity;
 }
 
 function syncTrainAnimationSuspendedState() {
@@ -12259,6 +12638,24 @@ sceneToggleLineOverlapPreviewButton?.addEventListener('click', () => {
   applySceneVisibilitySettings({ save: true });
   setMapLoadStatusText(`line重なりプレビュー: ${sceneVisibilitySettings.showDifferenceLineOverlapPreview ? 'ON' : 'OFF'}`);
 });
+sceneToggleDifferenceSpaceLinesButton?.addEventListener('click', () => {
+  sceneVisibilitySettings.showDifferenceSpaceLines = !sceneVisibilitySettings.showDifferenceSpaceLines;
+  applySceneVisibilitySettings({ save: true });
+  setMapLoadStatusText(`差分空間の線: ${sceneVisibilitySettings.showDifferenceSpaceLines ? 'ON' : 'OFF'}`);
+});
+sceneUbldOpacityRange?.addEventListener('input', () => {
+  const nextOpacity = Math.min(100, Math.max(0, Number(sceneUbldOpacityRange.value) || 0));
+  sceneVisibilitySettings.ubldOpacity = nextOpacity;
+  ubldOpacityButtonOverrideValue = null;
+  applySceneVisibilitySettings({ save: false });
+});
+sceneUbldOpacityRange?.addEventListener('change', () => {
+  const nextOpacity = Math.min(100, Math.max(0, Number(sceneUbldOpacityRange.value) || 0));
+  sceneVisibilitySettings.ubldOpacity = nextOpacity;
+  ubldOpacityButtonOverrideValue = null;
+  applySceneVisibilitySettings({ save: true });
+  setMapLoadStatusText(`ubld透過度: ${nextOpacity}`);
+});
 sceneToggleTrainMotionButton?.addEventListener('click', () => {
   setManualTrainAnimationPaused(!manualTrainAnimationPaused);
   setMapLoadStatusText(`列車進行: ${manualTrainAnimationPaused ? 'OFF (停止)' : 'ON'}`, { autoHide: false });
@@ -12295,7 +12692,7 @@ updatePerformancePanelUi();
 
 // ウィンドウリサイズ時の処理
 function onWindowResize() {
-  if (introWrapper && canvas.classList.contains('intro-canvas')) {
+  if (!isRuntimeMinimalPage && introWrapper && canvas.classList.contains('intro-canvas')) {
     // プレビュー表示中は introWrapper のサイズに合わせる
     const rect = introWrapper.getBoundingClientRect();
     const previewWidth = Math.min(640, Math.floor(rect.width - 16));
@@ -13519,6 +13916,7 @@ let structureDraggedPinLockedTrackName = null;
 const structurePinnedPins = [];
 const constructionSelectedPins = [];
 let railStructurePickMeshes = [];
+let railSelectionPickMeshes = [];
 let railGroupDragState = null;
 let railRotateDragState = null;
 let lastPointerScreen = null;
@@ -14735,6 +15133,7 @@ function updateRailPointFromMesh(mesh) {
   }
   structureSamplesDirty = true;
   drawRailSelectionLine(trackName, pointIndex);
+  updateRailCoordinatePanelUI({ clearInputs: true });
 }
 
 function ensureRailInsertHoverPin() {
@@ -15223,6 +15622,7 @@ function refreshRailSelectionTargets() {
       };
       scene.add(mesh);
       targetObjects.push(mesh);
+      railSelectionPickMeshes.push(mesh);
       railStructurePickMeshes.push(mesh);
     });
   }
@@ -15238,6 +15638,7 @@ function refreshRailSelectionTargets() {
       mesh.userData = { trackName: track.name, pointIndex: index };
       scene.add(mesh);
       targetObjects.push(mesh);
+      railSelectionPickMeshes.push(mesh);
     });
   });
   updateRailSelectionStatus();
@@ -15266,14 +15667,9 @@ function applyRailStructureGroupYawDelta(groupKey, deltaDeg) {
 }
 
 function clearRailSelectionTargetsOnly() {
-  for (let i = targetObjects.length - 1; i >= 0; i -= 1) {
-    const mesh = targetObjects[i];
+  for (let i = railSelectionPickMeshes.length - 1; i >= 0; i -= 1) {
+    const mesh = railSelectionPickMeshes[i];
     if (!mesh?.isMesh) { continue; }
-    const isRailPointTarget = mesh?.userData
-      && mesh.userData.trackName != null
-      && mesh.userData.pointIndex != null;
-    const isRailStructureHandle = Boolean(mesh?.userData?.railStructureHandle && mesh?.userData?.railStructurePickHandle);
-    if (!isRailPointTarget && !isRailStructureHandle) { continue; }
     if (mesh.parent) {
       mesh.parent.remove(mesh);
     }
@@ -15285,8 +15681,17 @@ function clearRailSelectionTargetsOnly() {
     } else {
       mesh.material?.dispose?.();
     }
-    targetObjects.splice(i, 1);
   }
+  railSelectionPickMeshes = [];
+  railStructurePickMeshes = [];
+  targetObjects = targetObjects.filter((mesh) => {
+    if (!mesh?.isMesh) { return true; }
+    const isRailPointTarget = mesh?.userData
+      && mesh.userData.trackName != null
+      && mesh.userData.pointIndex != null;
+    const isRailStructureHandle = Boolean(mesh?.userData?.railStructureHandle && mesh?.userData?.railStructurePickHandle);
+    return !isRailPointTarget && !isRailStructureHandle;
+  });
 }
 
 function showRailGeneratedStructures() {
@@ -15317,30 +15722,72 @@ function applyStructurePreviewLikeVisibility() {
   setMeshListOpacity(pointMeshes, 0);
 }
 
-function syncDifferenceSpaceVisualStateForDisplay(logLabel = '[difference]') {
+function syncDifferenceSpaceVisualStateForDisplay(logLabel = '[difference]', role = activeSpaceEditRole) {
+  const normalizedRole = normalizeSpaceRole(role);
   const liveDifferenceSpaces = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane);
   if (liveDifferenceSpaces.length < 1) { return 0; }
-  targetObjects = liveDifferenceSpaces;
+  const visibleDifferenceSpaces = liveDifferenceSpaces.filter((mesh) => {
+    if (getSpaceRoleFromMesh(mesh) !== normalizedRole) { return false; }
+    if (normalizedRole === SPACE_ROLE_AREA) { return true; }
+    return !isDifferenceRailDerivedMesh(mesh);
+  });
+  targetObjects = visibleDifferenceSpaces;
   setMeshListOpacity(targetObjects, 1);
   liveDifferenceSpaces.forEach((mesh) => {
+    if (getSpaceRoleFromMesh(mesh) !== normalizedRole) {
+      applyDifferenceSpaceMeshStyle(mesh, { visible: false });
+      setDifferenceReadonlyControlPointsVisible(mesh, false);
+      return;
+    }
+    if (isDifferenceRailDerivedMesh(mesh)) {
+      applyDifferenceSpaceMeshStyle(mesh, { visible: false });
+      setDifferenceReadonlyControlPointsVisible(mesh, false);
+      return;
+    }
     applyDifferenceSpaceMeshStyle(mesh, { visible: true });
     applyDifferenceOpenFacesToMesh(mesh);
   });
-  ensureDifferenceRailDisplayMeshes();
-  setDifferenceRailDisplayMeshesVisible(true);
+  if (normalizedRole === SPACE_ROLE_DIFFERENCE) {
+    ensureDifferenceRailDisplayMeshes();
+    setDifferenceRailDisplayMeshesVisible(false);
+  } else {
+    setDifferenceRailDisplayMeshesVisible(false);
+  }
   updateDifferenceModePanels();
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
   syncDifferenceReadonlyTunnelSpaceVisibility();
   console.info(`${logLabel} synced difference space display`, {
     liveDifferenceSpaceCount: liveDifferenceSpaces.length,
+    visibleDifferenceSpaceCount: visibleDifferenceSpaces.length,
   });
-  return liveDifferenceSpaces.length;
+  return visibleDifferenceSpaces.length;
+}
+
+function ensureLoadedDifferenceSpacesReady(logLabel = '[difference]', role = activeSpaceEditRole) {
+  let restoredFromPayload = false;
+  if (countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload) > 0
+    && lastLoadedStandaloneDifferencePayload
+    && Array.isArray(lastLoadedStandaloneDifferencePayload?.differenceSpaces)
+    && lastLoadedStandaloneDifferencePayload.differenceSpaces.length > 0) {
+    try {
+      restoreDifferenceSpacesFromPayload(lastLoadedStandaloneDifferencePayload, { clearExisting: false, applyToCity: false, includeRailOperations: false });
+      restoredFromPayload = true;
+    } catch (err) {
+      console.warn(`${logLabel} failed to restore last loaded standalone spaces`, err);
+    }
+  }
+  const liveDifferenceSpaceCount = syncDifferenceSpaceVisualStateForDisplay(logLabel, role);
+  return {
+    restoredFromPayload,
+    liveDifferenceSpaceCount,
+  };
 }
 
 function shouldShowDifferenceReadonlyTunnelSpaces() {
   try {
     return Boolean(
-      railModeActive
+      viewModeActive
+      || railModeActive
       || differenceSpaceModeActive
       || editObject === 'RAIL'
       || editObject === 'DIFFERENCE_SPACE'
@@ -15350,9 +15797,14 @@ function shouldShowDifferenceReadonlyTunnelSpaces() {
   }
 }
 
+function isTunnelReadonlyGenerationCategory(category) {
+  const kind = String(category || '').trim();
+  return kind === 'tunnel_circle' || kind === 'tunnel_rect';
+}
+
 function hasTunnelCircleGenerationRuns() {
   return (Array.isArray(structureGenerationRuns) ? structureGenerationRuns : [])
-    .some((run) => String(run?.category || '').trim() === 'tunnel_circle');
+    .some((run) => isTunnelReadonlyGenerationCategory(run?.category));
 }
 
 function shouldSkipDifferenceSpaceInPersistentSave(mesh) {
@@ -15386,9 +15838,10 @@ function syncDifferenceReadonlyTunnelTexturePickability() {
 }
 
 function isDifferenceReadonlyTunnelMesh(mesh) {
+  const generatedBy = String(mesh?.userData?.differenceGeneratedBy || '').trim();
   return Boolean(
     mesh?.userData?.differenceReadonlyDisplay
-    && String(mesh.userData?.differenceGeneratedBy || '') === 'rail_tunnel_circle'
+    && (generatedBy === 'rail_tunnel_circle' || generatedBy === 'rail_tunnel_rect')
   );
 }
 
@@ -15413,6 +15866,7 @@ function shouldDifferenceMeshParticipateInSharedPointMerge(mesh) {
 function canDifferenceMeshesSharePoints(meshA, meshB) {
   if (!meshA?.userData?.differenceSpacePlane || !meshB?.userData?.differenceSpacePlane) { return false; }
   if (meshA === meshB) { return true; }
+  if (getSpaceRoleFromMesh(meshA) !== getSpaceRoleFromMesh(meshB)) { return false; }
   return shouldDifferenceMeshParticipateInSharedPointMerge(meshA)
     && shouldDifferenceMeshParticipateInSharedPointMerge(meshB);
 }
@@ -15426,6 +15880,10 @@ function getDifferenceReadonlyTunnelPreviewChunkMeshes(mesh) {
   const group = getDifferenceReadonlyTunnelPreviewGroup(mesh);
   if (!group?.children) { return []; }
   return group.children.filter((child) => child?.isMesh && child.userData?.differenceReadonlyTunnelPreviewChunk);
+}
+
+function shouldDifferenceReadonlyTunnelUseSingleSpace(mesh = null) {
+  return isDifferenceReadonlyTunnelMesh(mesh);
 }
 
 function clearDifferenceReadonlyTunnelPreviewChunks(mesh) {
@@ -15473,7 +15931,7 @@ function clearReadonlyTunnelDifferenceSpaces() {
     }
   });
   if (targets.length > 0) {
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
     refreshDifferenceSelectedEdgeHighlights();
     updateDifferenceUnifyButtonState();
   }
@@ -16841,8 +17299,25 @@ if (saveButtonsContainer) {
 function extractDifferenceSerializedRuntimeState(mesh) {
   if (!mesh?.userData) { return null; }
   if (isDifferenceReadonlyTunnelMesh(mesh)) {
+    const generatedBy = String(mesh.userData?.differenceGeneratedBy || '').trim() || 'rail_tunnel_circle';
+    if (generatedBy === 'rail_tunnel_rect') {
+      return {
+        differenceGeneratedBy: 'rail_tunnel_rect',
+        differenceTunnelTrackNames: Array.isArray(mesh.userData?.differenceTunnelTrackNames)
+          ? mesh.userData.differenceTunnelTrackNames.slice()
+          : [],
+        differenceTunnelRectWidth: Number(mesh.userData?.differenceTunnelRectWidth) || 0,
+        differenceTunnelRectHeight: Number(mesh.userData?.differenceTunnelRectHeight) || 0,
+        differenceTunnelSideClearance: Number(mesh.userData?.differenceTunnelSideClearance) || 0,
+        differenceRailBandHeight: Number(mesh.userData?.differenceRailBandHeight) || 0,
+        differenceRailSidePadding: Number(mesh.userData?.differenceRailSidePadding) || 0,
+        differenceRailInnerPadding: Number(mesh.userData?.differenceRailInnerPadding) || 0,
+        differenceRailMinBandWidth: Number(mesh.userData?.differenceRailMinBandWidth) || 0,
+        differenceRailSampleStepMeters: Number(mesh.userData?.differenceRailSampleStepMeters) || 0,
+      };
+    }
     return {
-      differenceGeneratedBy: 'rail_tunnel_circle',
+      differenceGeneratedBy: generatedBy,
       differenceTunnelTrackNames: Array.isArray(mesh.userData?.differenceTunnelTrackNames)
         ? mesh.userData.differenceTunnelTrackNames.slice()
         : [],
@@ -16857,6 +17332,7 @@ function extractDifferenceSerializedRuntimeState(mesh) {
 }
 
 function serializeDifferenceSpaceMesh(mesh, { includeRuntimeState = false } = {}) {
+  const spaceRole = getSpaceRoleFromMesh(mesh);
   const railTrackNames = Array.isArray(mesh?.userData?.differenceRailTrackNames)
     ? mesh.userData.differenceRailTrackNames
       .map((name) => String(name || '').trim())
@@ -16871,6 +17347,7 @@ function serializeDifferenceSpaceMesh(mesh, { includeRuntimeState = false } = {}
       innerPadding: Number(mesh?.userData?.differenceRailInnerPadding) || 0.6,
       minBandWidth: Number(mesh?.userData?.differenceRailMinBandWidth) || 1.2,
       sampleStepMeters: Number(mesh?.userData?.differenceRailSampleStepMeters) || 2.0,
+      differenceSpaceRole: spaceRole,
       differenceTargets: cloneDifferenceTargets(mesh?.userData?.differenceTargets || DEFAULT_DIFFERENCE_TARGETS),
       differenceOpenFaces: getDifferenceOpenFacesFromMesh(mesh),
     };
@@ -16882,6 +17359,9 @@ function serializeDifferenceSpaceMesh(mesh, { includeRuntimeState = false } = {}
     position: [mesh.position.x, mesh.position.y, mesh.position.z],
     quaternion: [mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w],
     scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z],
+    differenceSpaceRole: spaceRole,
+    areaName: isAreaSpaceMesh(mesh) ? getAreaSpaceName(mesh) : '',
+    areaStructureVisible: mesh?.userData?.areaStructureVisible !== false,
     differenceTexture: cloneDifferenceTextureConfig(mesh?.userData?.differenceTexture || null),
     differenceProjectorType: String(mesh?.userData?.differenceProjectorType || '').trim() || 'box',
     differenceTubeCurvePoints: Array.isArray(mesh?.userData?.differenceTubeCurvePoints)
@@ -16921,10 +17401,37 @@ function normalizeDifferenceRailOperation(rawOperation) {
   };
 }
 
+function getDifferenceRailOperationKey(rawOperation) {
+  const operation = normalizeDifferenceRailOperation(rawOperation);
+  return operation ? JSON.stringify(operation) : '';
+}
+
+function addDifferenceRailOperationIfMissing(rawOperation) {
+  const operation = normalizeDifferenceRailOperation(rawOperation);
+  if (!operation) { return null; }
+  const operationKey = getDifferenceRailOperationKey(operation);
+  if (!operationKey) { return null; }
+  const exists = differenceRailOperations.some((existing) => {
+    return getDifferenceRailOperationKey(existing) === operationKey;
+  });
+  if (exists) {
+    return operation;
+  }
+  differenceRailOperations.push(operation);
+  return operation;
+}
+
 function serializeDifferenceRailOperations() {
+  const seen = new Set();
   return differenceRailOperations
     .map((operation) => normalizeDifferenceRailOperation(operation))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((operation) => {
+      const key = getDifferenceRailOperationKey(operation);
+      if (!key || seen.has(key)) { return false; }
+      seen.add(key);
+      return true;
+    });
 }
 
 function buildDifferenceRailOperationFromCutter(sourceMesh) {
@@ -17866,6 +18373,7 @@ function buildDifferenceSpacesPayload(options = {}) {
   const includeMeta = options?.includeMeta !== false;
   const spaces = differenceSpacePlanes
     .filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane)
+    .filter((mesh) => isDifferenceExcavationSpaceMesh(mesh))
     .filter((mesh) => !Array.isArray(mesh?.userData?.differenceRailTrackNames) || mesh.userData.differenceRailTrackNames.length < 1)
     // 永続保存ではトンネル由来 geometry を持たず、snapshot だけ runtime tunnel を許可する。
     .filter((mesh) => includeRuntimeState || !shouldSkipDifferenceSpaceInPersistentSave(mesh))
@@ -17905,8 +18413,14 @@ function buildCreateModePayload(options = {}) {
 
   const spaces = differenceSpacePlanes
     .filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane)
+    .filter((mesh) => isDifferenceExcavationSpaceMesh(mesh))
     .filter((mesh) => !Array.isArray(mesh?.userData?.differenceRailTrackNames) || mesh.userData.differenceRailTrackNames.length < 1)
     .filter((mesh) => !shouldSkipDifferenceSpaceInPersistentSave(mesh))
+    .map((mesh) => serializeDifferenceSpaceMesh(mesh))
+    .filter(Boolean);
+  const areaSpaces = differenceSpacePlanes
+    .filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane)
+    .filter((mesh) => isAreaSpaceMesh(mesh))
     .map((mesh) => serializeDifferenceSpaceMesh(mesh))
     .filter(Boolean);
   const railOperations = serializeDifferenceRailOperations();
@@ -18016,6 +18530,7 @@ function buildCreateModePayload(options = {}) {
     trainRunConfigs: trainRunConfigs.map((config) => normalizeTrainRunConfig(config)),
     differenceSpaces: includeDifferenceSpaces ? spaces : [],
     differenceRailOperations: includeDifferenceSpaces ? railOperations : [],
+    areaSpaces,
   };
 }
 
@@ -18423,6 +18938,9 @@ if (saveWorldButton) {
 if (toggleGroundOpacityButton) {
   toggleGroundOpacityButton.addEventListener('click', toggleGroundOpacity);
 }
+if (toggleUbldOpacityButton) {
+  toggleUbldOpacityButton.addEventListener('click', toggleUbldOpacity);
+}
 if (toggleTrainPanelButton) {
   toggleTrainPanelButton.addEventListener('click', () => {
     const nextVisible = trainPanel?.style.display !== 'block';
@@ -18430,6 +18948,38 @@ if (toggleTrainPanelButton) {
     if (nextVisible) {
       syncTrainPanelFromConfig();
     }
+  });
+}
+if (toggleAreaVisibilityPanelButton) {
+  toggleAreaVisibilityPanelButton.addEventListener('click', () => {
+    const nextVisible = areaVisibilityPanel?.style.display !== 'block';
+    setAreaVisibilityPanelVisible(nextVisible);
+  });
+}
+if (areaVisibilityRefreshButton) {
+  areaVisibilityRefreshButton.addEventListener('click', () => {
+    recomputeAreaManagedMeshVisibility();
+    renderAreaVisibilityRows();
+    updateDifferenceStatus('Area一覧を更新しました。');
+  });
+}
+if (areaVisibilityShowAllButton) {
+  areaVisibilityShowAllButton.addEventListener('click', () => {
+    showAllAreaManagedStructureMeshes();
+    renderAreaVisibilityRows();
+    syncAreaStructurePanelFromSelection();
+  });
+}
+if (areaVisibilityList) {
+  areaVisibilityList.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-area-visibility-toggle]');
+    if (!button) { return; }
+    const areaName = String(button.getAttribute('data-area-visibility-toggle') || '').trim();
+    if (!areaName) { return; }
+    const hidden = getHiddenAreaNames().has(areaName);
+    setAreaStructureVisibilityByName(areaName, hidden);
+    renderAreaVisibilityRows();
+    syncAreaStructurePanelFromSelection();
   });
 }
 if (trainApplyButton) {
@@ -18501,6 +19051,8 @@ function clearDifferenceSpacesForImport() {
   differenceSpacePlanes.length = 0;
   differenceSelectedPlane = null;
   updateDifferenceUnifyButtonState();
+  updateDifferenceCopyButtonState();
+  renderAreaVisibilityRows();
 }
 
 function clearDifferenceRailOperations() {
@@ -18553,6 +19105,21 @@ function setDifferenceReadonlyControlPointsVisible(mesh, visible = false) {
     child.visible = visible;
     child.raycast = () => {};
     applyDifferenceControlPointMeshStyle(child, { visible });
+  });
+}
+
+function setAllDifferenceControlPointsVisible(visible = false) {
+  differenceSpacePlanes.forEach((mesh) => {
+    if (!mesh?.parent || !mesh?.userData?.differenceSpacePlane) { return; }
+    mesh.children.forEach((child) => {
+      if (!child?.userData?.differenceControlPoint) { return; }
+      const pointVisible = Boolean(visible) && mesh.visible !== false;
+      child.visible = pointVisible;
+      if (mesh?.userData?.differenceReadonlyDisplay) {
+        child.raycast = () => {};
+      }
+      applyDifferenceControlPointMeshStyle(child, { visible: pointVisible });
+    });
   });
 }
 
@@ -18899,7 +19466,7 @@ function createDifferenceReadonlyTunnelPreviewChunkMesh(group, rootMesh, geometr
     ...(userDataExtras && typeof userDataExtras === 'object' ? userDataExtras : {}),
     differenceSpacePlane: true,
     differenceReadonlyDisplay: true,
-    differenceGeneratedBy: 'rail_tunnel_circle',
+    differenceGeneratedBy: String(rootMesh.userData?.differenceGeneratedBy || '').trim() || 'rail_tunnel_circle',
     differenceReadonlyTunnelPreviewChunk: true,
     differenceReadonlyTunnelPreviewChunkKey: String(chunkKey || chunkIndex),
     differenceTunnelTrackNames: Array.isArray(rootMesh.userData?.differenceTunnelTrackNames)
@@ -18917,6 +19484,10 @@ function createDifferenceReadonlyTunnelPreviewChunkMesh(group, rootMesh, geometr
 
 function ensureDifferenceReadonlyTunnelPreviewChunks(mesh) {
   if (!isDifferenceReadonlyTunnelMesh(mesh) || !mesh?.geometry) { return []; }
+  if (shouldDifferenceReadonlyTunnelUseSingleSpace(mesh)) {
+    clearDifferenceReadonlyTunnelPreviewChunks(mesh);
+    return [];
+  }
   const existing = getDifferenceReadonlyTunnelPreviewChunkMeshes(mesh);
   if (existing.length > 0) { return existing; }
 
@@ -19052,6 +19623,22 @@ function buildGeometryFromSerializedSpace(rawSpace) {
 function normalizeDifferenceSerializedRuntimeState(rawState) {
   if (!rawState || typeof rawState !== 'object') { return null; }
   const generatedBy = String(rawState?.differenceGeneratedBy || '').trim();
+  if (generatedBy === 'rail_tunnel_rect') {
+    return {
+      differenceGeneratedBy: 'rail_tunnel_rect',
+      differenceTunnelTrackNames: Array.isArray(rawState?.differenceTunnelTrackNames)
+        ? rawState.differenceTunnelTrackNames.map((name) => String(name || '').trim()).filter((name) => name.length > 0)
+        : [],
+      differenceTunnelRectWidth: Math.max(0.2, Number(rawState?.differenceTunnelRectWidth) || 1.4),
+      differenceTunnelRectHeight: Math.max(0.2, Number(rawState?.differenceTunnelRectHeight) || 1.4),
+      differenceTunnelSideClearance: Number(rawState?.differenceTunnelSideClearance) || 0,
+      differenceRailBandHeight: Math.max(0.2, Number(rawState?.differenceRailBandHeight) || Number(rawState?.differenceTunnelRectHeight) || 1.4),
+      differenceRailSidePadding: Math.max(0, Number(rawState?.differenceRailSidePadding) || 0),
+      differenceRailInnerPadding: Math.max(0, Number(rawState?.differenceRailInnerPadding) || 0),
+      differenceRailMinBandWidth: Math.max(0.2, Number(rawState?.differenceRailMinBandWidth) || Number(rawState?.differenceTunnelRectWidth) || 1.4),
+      differenceRailSampleStepMeters: Math.max(0.5, Number(rawState?.differenceRailSampleStepMeters) || 1.2),
+    };
+  }
   if (generatedBy !== 'rail_tunnel_circle') { return null; }
   return {
     differenceGeneratedBy: 'rail_tunnel_circle',
@@ -19207,6 +19794,7 @@ function applyCreateModePayload(payload) {
   changeAngleGridTarget = getLastEditableGuideGrid();
   const spaces = Array.isArray(payload.differenceSpaces) ? payload.differenceSpaces : [];
   restoreDifferenceSpacesFromPayload(payload, { clearExisting: true, applyToCity: true });
+  restoreAreaSpacesFromPayload(payload, { clearExisting: false });
   trainRunConfigs = Array.isArray(payload?.trainRunConfigs) && payload.trainRunConfigs.length > 0
     ? payload.trainRunConfigs.map((config) => normalizeTrainRunConfig(config))
     : [structuredClone(DEFAULT_TRAIN_RUN_CONFIG)];
@@ -19247,7 +19835,7 @@ function applyCreateModePayload(payload) {
   }
   targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
   setMeshListOpacity(targetObjects, 1);
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
   updateDifferenceStatus(`map_data 読込完了: 空間 ${differenceSpacePlanes.length} 件 / ガイド ${guideAddGrids.length} 件`);
   updateDifferenceUnifyButtonState();
 
@@ -19261,6 +19849,7 @@ function applyCreateModePayload(payload) {
   setRailConstructionGroupOptions();
   updateGroupModePanelUI();
   updateGroundOpacityButtonState();
+  updateUbldOpacityButtonState();
   syncTrainPanelFromConfig();
   applyAllConfiguredTrains();
 }
@@ -19297,6 +19886,7 @@ async function loadRuntimeMapGlbFromPublicUpload(arrayBuffer, fileName = 'public
   if (kind === 'ct') {
     root.rotation.y = 0;
     root.scale.multiplyScalar(WORLD_SCALE);
+    disableEnvMapInfluenceForEmissionNamedCityMaterials(root);
   }
 
   root.name = objectName;
@@ -19348,21 +19938,19 @@ function activatePublicRuntimeObjectViewMode() {
 function applyRuntimeMapLoadedUiState() {
   activateSeeModeOnLoadCompletePending = false;
   completeLoadingOverlayState('読み込み完了');
-  const appliedSavedUiState = typeof window !== 'undefined'
-    && typeof window.applyTrainEditSavedUiState === 'function'
-    ? window.applyTrainEditSavedUiState(null)
-    : false;
-  const appliedDifferenceSpaceUi = !appliedSavedUiState
-    && getActiveDifferenceSpaces().length > 0
-    && typeof window !== 'undefined'
-    && typeof window.applyTrainEditUiStateById === 'function'
-    ? window.applyTrainEditUiStateById('space')
-    : false;
-  if (!appliedSavedUiState && !appliedDifferenceSpaceUi) {
-    UIevent('rail', 'inactive');
-    UIevent('structure', 'inactive');
-    UIevent('edit', 'inactive');
-    UIevent('see', 'active');
+  const hasStandaloneDifferencePayload = Array.isArray(lastLoadedStandaloneDifferencePayload?.differenceSpaces)
+    && lastLoadedStandaloneDifferencePayload.differenceSpaces.length > 0;
+  const hasLiveDifferenceSpaces = getActiveDifferenceSpaces().length > 0;
+  const shouldRestoreDifferenceSpaces = hasStandaloneDifferencePayload || hasLiveDifferenceSpaces;
+  if (shouldRestoreDifferenceSpaces) {
+    ensureLoadedDifferenceSpacesReady('[difference][load-complete][pre-see]');
+  }
+  UIevent('rail', 'inactive');
+  UIevent('structure', 'inactive');
+  UIevent('edit', 'inactive');
+  UIevent('see', 'active');
+  if (shouldRestoreDifferenceSpaces) {
+    ensureLoadedDifferenceSpacesReady('[difference][load-complete][post-see]');
   }
   hideLoadingOverlayElement();
 }
@@ -19744,7 +20332,7 @@ async function loadRuntimeMapFromPublicUpload() {
           return false;
         }
         try {
-          restoreDifferenceSpacesFromPayload(standaloneDifferenceRow.payload, { clearExisting: false, applyToCity: true });
+          restoreDifferenceSpacesFromPayload(standaloneDifferenceRow.payload, { clearExisting: false, applyToCity: true, includeRailOperations: false });
           console.info('[public_upload][ct] fallback restored standalone difference spaces', {
             stageLabel,
             expectedStandaloneSpaceCount,
@@ -19948,6 +20536,7 @@ async function loadRuntimeMapFromPublicUpload() {
   if (railConstructionStatus) { railConstructionStatus.textContent = statusText; }
   updateDifferenceStatus(statusText);
   updateGroundOpacityButtonState();
+  updateUbldOpacityButtonState();
   if (IS_PUBLIC_RUNTIME_LOCAL_VIEW) {
     activatePublicRuntimeObjectViewMode();
     publicRuntimeMapCleanupPending = true;
@@ -20184,6 +20773,7 @@ function appendCreateModePayload(payload, options = {}) {
   changeAngleGridTarget = getLastEditableGuideGrid();
   const spaces = Array.isArray(payload.differenceSpaces) ? payload.differenceSpaces : [];
   restoreDifferenceSpacesFromPayload(payload, { clearExisting: false, applyToCity: true });
+  restoreAreaSpacesFromPayload(payload, { clearExisting: false });
 
   setRailConstructionGroupOptions();
   updateGroupModePanelUI();
@@ -21451,6 +22041,11 @@ function drawingObject(changedPoints = null){
     return;
   }
 
+  if (editObject === 'DIFFERENCE_SPACE') {
+    clean_object(['Rail']);
+    return;
+  }
+
   clean_object(['DeckSlab','Pillar','Rail','OBJECT' + group_EditNow])
   if (targetObjects.length < 2){return}
 
@@ -22316,6 +22911,14 @@ const differenceRailOperations = []
 const differenceRailDisplayMeshes = []
 let differenceRailDisplayMeshesVisible = false
 let differenceSelectedPlane = null
+const SPACE_ROLE_DIFFERENCE = 'difference'
+const SPACE_ROLE_AREA = 'area'
+let activeSpaceEditRole = SPACE_ROLE_DIFFERENCE
+let differenceBodySelectionMode = 'none'
+let differenceAreaBoxSelectionActive = false
+let differenceAreaBoxSelectionPointerMoved = false
+let differenceAreaBoxSelectionStartClient = null
+let differenceAreaBoxSelectionCurrentClient = null
 const DIFFERENCE_TEXTURE_PRESETS = [
   { id: 'none', label: 'なし', path: '', repeatX: 1, repeatY: 1 },
   { id: 'station', label: 'station', path: 'textures/test_station.jpg', repeatX: 1, repeatY: 1 },
@@ -22369,7 +22972,7 @@ let differenceSelectionKind = 'none'
 const differenceSharedPointLinkEpsilon = 0.02
 const differenceAutoMergeDistance = 0.08
 const differenceBoundaryMergeDistance = 0.06
-var differenceAutoMergeEnabled = true
+var differenceAutoMergeEnabled = false
 const differenceMoveRangeFromStart = 30
 const differenceEdgeOverlapConstraints = []
 const differenceIntersectionPointRadius = 0.035
@@ -22565,6 +23168,54 @@ function clearCreateHistory() {
   updateUndoRedoButtons();
 }
 
+function normalizeSpaceRole(rawRole) {
+  return String(rawRole || '').trim() === SPACE_ROLE_AREA
+    ? SPACE_ROLE_AREA
+    : SPACE_ROLE_DIFFERENCE;
+}
+
+function getSpaceRoleFromMesh(mesh) {
+  return normalizeSpaceRole(mesh?.userData?.differenceSpaceRole);
+}
+
+function setActiveSpaceEditRole(role = SPACE_ROLE_DIFFERENCE) {
+  activeSpaceEditRole = normalizeSpaceRole(role);
+}
+
+function isAreaSpaceMesh(mesh) {
+  return getSpaceRoleFromMesh(mesh) === SPACE_ROLE_AREA;
+}
+
+function isDifferenceExcavationSpaceMesh(mesh) {
+  return getSpaceRoleFromMesh(mesh) === SPACE_ROLE_DIFFERENCE;
+}
+
+function normalizeAreaSpaceName(rawName, fallback = '') {
+  const trimmed = String(rawName || '').trim();
+  return trimmed || String(fallback || '').trim();
+}
+
+function buildDefaultAreaSpaceName() {
+  const count = differenceSpacePlanes.filter((mesh) => mesh?.parent && isAreaSpaceMesh(mesh)).length;
+  return `Area ${Math.max(1, count)}`;
+}
+
+function getAreaSpaceName(mesh) {
+  if (!isAreaSpaceMesh(mesh)) { return ''; }
+  return normalizeAreaSpaceName(mesh?.userData?.areaName, buildDefaultAreaSpaceName());
+}
+
+function setAreaSpaceName(mesh, rawName) {
+  if (!mesh?.userData || !isAreaSpaceMesh(mesh)) { return ''; }
+  const nextName = normalizeAreaSpaceName(rawName, getAreaSpaceName(mesh));
+  mesh.userData = {
+    ...(mesh.userData || {}),
+    areaName: nextName,
+  };
+  recomputeAreaManagedMeshVisibility();
+  return nextName;
+}
+
 function captureDifferenceSnapshot() {
   return buildDifferenceSpacesPayload({
     includeMeta: false,
@@ -22575,9 +23226,9 @@ function captureDifferenceSnapshot() {
 function captureDifferenceUnifySnapshot() {
   const differencePayload = captureDifferenceSnapshot();
   const tunnelGenerationRuns = (Array.isArray(structureGenerationRuns) ? structureGenerationRuns : [])
-    .filter((run) => String(run?.category || '').trim() === 'tunnel_circle')
+    .filter((run) => isTunnelReadonlyGenerationCategory(run?.category))
     .map((run) => ({
-      category: 'tunnel_circle',
+      category: String(run?.category || '').trim(),
       pins: normalizePinsPayload(run?.pins),
       params: (run?.params && typeof run.params === 'object') ? { ...run.params } : {},
       _pinGenerationRuntimeId: String(run?._pinGenerationRuntimeId || '').trim(),
@@ -22606,9 +23257,9 @@ function restoreDifferenceSnapshotBeforeLatestUnify() {
   const payload = normalizeDifferenceHistorySnapshot(snapshot?.differencePayload || snapshot);
   const tunnelGenerationRuns = Array.isArray(snapshot?.tunnelGenerationRuns)
     ? snapshot.tunnelGenerationRuns
-      .filter((run) => String(run?.category || '').trim() === 'tunnel_circle')
+      .filter((run) => isTunnelReadonlyGenerationCategory(run?.category))
       .map((run) => ({
-        category: 'tunnel_circle',
+        category: String(run?.category || '').trim(),
         pins: normalizePinsPayload(run?.pins),
         params: (run?.params && typeof run.params === 'object') ? { ...run.params } : {},
         _pinGenerationRuntimeId: String(run?._pinGenerationRuntimeId || '').trim(),
@@ -22636,7 +23287,7 @@ function restoreDifferenceSnapshotBeforeLatestUnify() {
   });
   targetObjects = getActiveDifferenceSpaces();
   setMeshListOpacity(targetObjects, 1);
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
   refreshDifferenceSelectedEdgeHighlights();
   updateDifferenceStatus('一体化前の初期状態に戻しました。');
   updateDifferenceUnifyButtonState();
@@ -23258,9 +23909,46 @@ function shouldSceneShowDifferenceLineOverlapPreview() {
   return sceneVisibilitySettings.showDifferenceLineOverlapPreview !== false;
 }
 
+function shouldSceneShowDifferenceSpaceLines() {
+  return sceneVisibilitySettings.showDifferenceSpaceLines !== false;
+}
+
+function isDifferenceSimpleMoveModeActive() {
+  return editObject === 'DIFFERENCE_SPACE'
+    && differenceSpaceTransformMode === 'move'
+    && !shouldSceneShowDifferenceSpaceLines();
+}
+
+let differenceHeavyAuxProcessingScopeDepth = 0;
+
+function shouldRunDifferenceHeavyAuxProcessing() {
+  return differenceHeavyAuxProcessingScopeDepth > 0;
+}
+
+function runWithDifferenceHeavyAuxProcessing(callback) {
+  differenceHeavyAuxProcessingScopeDepth += 1;
+  try {
+    return callback();
+  } finally {
+    differenceHeavyAuxProcessingScopeDepth = Math.max(0, differenceHeavyAuxProcessingScopeDepth - 1);
+  }
+}
+
+function syncSceneDifferenceSpaceLineVisibility() {
+  if (!shouldSceneShowDifferenceSpaceLines()) {
+    clearDifferenceSelectedEdgeHighlights();
+    clearDifferencePreviewWireframeLines();
+    clearDifferenceIntersectionVisuals();
+    clearDifferenceClassifiedSegments();
+    return;
+  }
+  if (!differenceSpaceModeActive) { return; }
+  refreshDifferenceSelectedEdgeHighlights();
+}
+
 function syncSceneDifferenceLineOverlapPreview() {
   refreshDifferenceRailDisplayChunkVisibility();
-  if (!differenceSpaceModeActive) { return; }
+  if (!differenceSpaceModeActive || !shouldSceneShowDifferenceSpaceLines()) { return; }
   refreshDifferenceSelectedEdgeHighlights();
 }
 
@@ -23293,6 +23981,19 @@ function getGroundMeshes() {
   root.traverse((obj) => {
     if (!obj?.isMesh) { return; }
     if (String(obj.name || '').trim() !== 'ground') { return; }
+    meshes.push(obj);
+  });
+  return meshes;
+}
+
+function getUbldMeshes() {
+  const root = getCityModelRoot();
+  if (!root) { return []; }
+  const meshes = [];
+  root.traverse((obj) => {
+    if (!obj?.isMesh) { return; }
+    const name = String(obj.name || '').trim().toLowerCase();
+    if (!name.includes('ubld')) { return; }
     meshes.push(obj);
   });
   return meshes;
@@ -23379,11 +24080,219 @@ function setDifferenceOpenFacesForMesh(mesh, rawFaces = null) {
 }
 
 function getDifferenceEditableTargetMesh() {
-  if (differenceSelectedPlane?.parent && differenceSelectedPlane?.userData?.differenceSpacePlane) {
+  if (differenceSelectedPlane?.parent
+    && differenceSelectedPlane?.userData?.differenceSpacePlane
+    && getSpaceRoleFromMesh(differenceSelectedPlane) === activeSpaceEditRole) {
     return differenceSelectedPlane;
   }
-  const activeSpaces = getActiveDifferenceSpaces();
+  const activeSpaces = getActiveDifferenceSpaces(activeSpaceEditRole);
   return activeSpaces.length > 0 ? activeSpaces[activeSpaces.length - 1] : null;
+}
+
+function getAreaEditableTargetMesh() {
+  if (differenceSelectedPlane?.parent
+    && differenceSelectedPlane?.userData?.differenceSpacePlane
+    && isAreaSpaceMesh(differenceSelectedPlane)) {
+    return differenceSelectedPlane;
+  }
+  const areaSpaces = getActiveDifferenceSpaces(SPACE_ROLE_AREA);
+  return areaSpaces.length > 0 ? areaSpaces[areaSpaces.length - 1] : null;
+}
+
+function collectAreaStructureMeshes() {
+  const out = [];
+  const seen = new Set();
+  const pushMesh = (mesh) => {
+    if (!mesh?.isMesh || !mesh?.parent || !mesh?.geometry) { return; }
+    if (mesh?.userData?.differenceSpacePlane || mesh?.userData?.steelFramePoint) { return; }
+    if (seen.has(mesh.id)) { return; }
+    seen.add(mesh.id);
+    out.push(mesh);
+  };
+  getConstructionCopyTargets()
+    .filter((target) => target?.parent)
+    .forEach((target) => {
+      if (target.isMesh) {
+        pushMesh(target);
+      }
+      target.traverse?.((child) => {
+        if (child === target) { return; }
+        pushMesh(child);
+      });
+    });
+  return out;
+}
+
+function isPointInsideAreaSpaceLocal(areaMesh, localPoint) {
+  if (!areaMesh?.geometry?.attributes?.position || !localPoint?.isVector3) { return false; }
+  const geometry = areaMesh.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  if (!position || position.count < 3) { return false; }
+
+  const centroid = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 1) {
+    centroid.add(new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i)));
+  }
+  centroid.multiplyScalar(1 / position.count);
+
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const centroidOffset = new THREE.Vector3();
+  const pointOffset = new THREE.Vector3();
+  const epsilon = 1e-5;
+  const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3);
+
+  for (let tri = 0; tri < triangleCount; tri += 1) {
+    const i0 = index ? index.getX(tri * 3) : tri * 3;
+    const i1 = index ? index.getX(tri * 3 + 1) : tri * 3 + 1;
+    const i2 = index ? index.getX(tri * 3 + 2) : tri * 3 + 2;
+    a.set(position.getX(i0), position.getY(i0), position.getZ(i0));
+    b.set(position.getX(i1), position.getY(i1), position.getZ(i1));
+    c.set(position.getX(i2), position.getY(i2), position.getZ(i2));
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    normal.crossVectors(ab, ac);
+    if (normal.lengthSq() <= epsilon) { continue; }
+    normal.normalize();
+
+    centroidOffset.subVectors(centroid, a);
+    if (normal.dot(centroidOffset) > 0) {
+      normal.multiplyScalar(-1);
+    }
+
+    pointOffset.subVectors(localPoint, a);
+    if (normal.dot(pointOffset) > epsilon) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function collectAreaStructureMeshesForSpace(areaMesh) {
+  if (!areaMesh?.parent || !isAreaSpaceMesh(areaMesh)) { return []; }
+  areaMesh.updateMatrixWorld?.(true);
+  const worldToLocal = new THREE.Matrix4().copy(areaMesh.matrixWorld).invert();
+  return collectAreaStructureMeshes().filter((mesh) => {
+    const center = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+    if (!Number.isFinite(center.x) || !Number.isFinite(center.y) || !Number.isFinite(center.z)) {
+      return false;
+    }
+    const localCenter = center.applyMatrix4(worldToLocal);
+    return isPointInsideAreaSpaceLocal(areaMesh, localCenter);
+  });
+}
+
+function collectAreaSpaceGroups() {
+  const groups = new Map();
+  getActiveDifferenceSpaces(SPACE_ROLE_AREA).forEach((mesh) => {
+    const name = getAreaSpaceName(mesh) || 'Area';
+    if (!groups.has(name)) {
+      groups.set(name, []);
+    }
+    groups.get(name).push(mesh);
+  });
+  return groups;
+}
+
+function collectAreaStructureMeshesForAreaName(areaName = '') {
+  const name = normalizeAreaSpaceName(areaName, '');
+  if (!name) { return []; }
+  const groups = collectAreaSpaceGroups();
+  const spaces = groups.get(name) || [];
+  const meshes = [];
+  const seen = new Set();
+  spaces.forEach((space) => {
+    collectAreaStructureMeshesForSpace(space).forEach((mesh) => {
+      if (!mesh?.parent || seen.has(mesh.id)) { return; }
+      seen.add(mesh.id);
+      meshes.push(mesh);
+    });
+  });
+  return meshes;
+}
+
+function getHiddenAreaNames() {
+  const names = new Set();
+  getActiveDifferenceSpaces(SPACE_ROLE_AREA).forEach((mesh) => {
+    if (mesh?.userData?.areaStructureVisible === false) {
+      names.add(getAreaSpaceName(mesh) || 'Area');
+    }
+  });
+  return names;
+}
+
+function recomputeAreaManagedMeshVisibility() {
+  const allMeshes = collectAreaStructureMeshes();
+  allMeshes.forEach((mesh) => {
+    mesh.userData = {
+      ...(mesh.userData || {}),
+      areaHiddenByPanel: false,
+    };
+    mesh.visible = true;
+  });
+  const hiddenNames = getHiddenAreaNames();
+  hiddenNames.forEach((name) => {
+    collectAreaStructureMeshesForAreaName(name).forEach((mesh) => {
+      mesh.userData = {
+        ...(mesh.userData || {}),
+        areaHiddenByPanel: true,
+      };
+      mesh.visible = false;
+    });
+  });
+  renderAreaVisibilityRows();
+  return {
+    totalMeshCount: allMeshes.length,
+    hiddenAreaCount: hiddenNames.size,
+  };
+}
+
+function setAreaStructureVisibilityByName(areaName, visible = true) {
+  const name = normalizeAreaSpaceName(areaName, '');
+  if (!name) { return 0; }
+  const groups = collectAreaSpaceGroups();
+  const spaces = groups.get(name) || [];
+  spaces.forEach((mesh) => {
+    mesh.userData = {
+      ...(mesh.userData || {}),
+      areaStructureVisible: visible === true,
+    };
+  });
+  recomputeAreaManagedMeshVisibility();
+  const affectedMeshes = collectAreaStructureMeshesForAreaName(name);
+  updateDifferenceStatus(`${name}: ${affectedMeshes.length} メッシュを${visible === true ? '表示' : '非表示'}にしました。`);
+  return affectedMeshes.length;
+}
+
+function setAreaStructureMeshesVisibleByArea(areaMesh, visible = true) {
+  const targetArea = areaMesh?.parent ? areaMesh : getAreaEditableTargetMesh();
+  if (!targetArea?.parent || !isAreaSpaceMesh(targetArea)) {
+    updateDifferenceStatus('Area内表示切替: Area空間を1つ選択してください。');
+    return 0;
+  }
+  return setAreaStructureVisibilityByName(getAreaSpaceName(targetArea), visible);
+}
+
+function showAllAreaManagedStructureMeshes() {
+  let count = 0;
+  getActiveDifferenceSpaces(SPACE_ROLE_AREA).forEach((mesh) => {
+    if (mesh?.userData?.areaStructureVisible === false) {
+      count += 1;
+    }
+    mesh.userData = {
+      ...(mesh.userData || {}),
+      areaStructureVisible: true,
+    };
+  });
+  recomputeAreaManagedMeshVisibility();
+  updateDifferenceStatus(`Area表示制御を解除しました。対象 ${count} メッシュ`);
+  return count;
 }
 
 function getDifferenceCityTargetMeshes() {
@@ -23543,7 +24452,9 @@ function applySceneVisibilitySettings({ save = true } = {}) {
   syncTrainGroupVisibility();
   syncSinjyukuCityVisibility();
   applyRecommendedGroundSettings();
+  applyUbldOpacitySetting(getEffectiveUbldOpacitySetting());
   syncSceneDifferenceLineOverlapPreview();
+  syncSceneDifferenceSpaceLineVisibility();
   updateScenePanelUi();
   if (save) {
     saveSceneVisibilitySettings();
@@ -23552,21 +24463,86 @@ function applySceneVisibilitySettings({ save = true } = {}) {
 
 applySceneVisibilitySettings({ save: false });
 
-function setMaterialOpacity(material, opacity) {
+function storeMaterialOpacityBaseState(material, stateKey = 'opacityBaseState') {
   if (!material || !('opacity' in material)) { return; }
-  if (material.userData?.groundBaseTransparent == null) {
-    material.userData = {
-      ...(material.userData || {}),
-      groundBaseTransparent: Boolean(material.transparent),
-      groundBaseOpacity: typeof material.opacity === 'number' ? material.opacity : 1,
-      groundBaseDepthWrite: 'depthWrite' in material ? Boolean(material.depthWrite) : true,
-    };
+  const key = String(stateKey || 'opacityBaseState');
+  if (material.userData?.[key] != null) { return; }
+  material.userData = {
+    ...(material.userData || {}),
+    [key]: {
+      transparent: Boolean(material.transparent),
+      opacity: typeof material.opacity === 'number' ? material.opacity : 1,
+      depthWrite: 'depthWrite' in material ? Boolean(material.depthWrite) : true,
+    },
+  };
+}
+
+function storeMeshRenderOrderBaseState(mesh, stateKey = 'renderOrderBaseState') {
+  if (!mesh?.isObject3D) { return; }
+  const key = String(stateKey || 'renderOrderBaseState');
+  mesh.userData = mesh.userData || {};
+  if (mesh.userData[key] != null) { return; }
+  mesh.userData[key] = Number(mesh.renderOrder) || 0;
+}
+
+function storeMeshVisibilityBaseState(mesh, stateKey = 'visibleBaseState') {
+  if (!mesh?.isObject3D) { return; }
+  const key = String(stateKey || 'visibleBaseState');
+  mesh.userData = mesh.userData || {};
+  if (mesh.userData[key] != null) { return; }
+  mesh.userData[key] = Boolean(mesh.visible);
+}
+
+function setMeshRenderOrder(mesh, renderOrder, { stateKey = 'renderOrderBaseState' } = {}) {
+  if (!mesh?.isObject3D) { return; }
+  storeMeshRenderOrderBaseState(mesh, stateKey);
+  mesh.renderOrder = Number(renderOrder) || 0;
+}
+
+function restoreMeshRenderOrder(mesh, { stateKey = 'renderOrderBaseState' } = {}) {
+  if (!mesh?.isObject3D) { return; }
+  const key = String(stateKey || 'renderOrderBaseState');
+  const baseOrder = Number(mesh.userData?.[key]);
+  mesh.renderOrder = Number.isFinite(baseOrder) ? baseOrder : 0;
+}
+
+function setMeshVisible(mesh, visible, { stateKey = 'visibleBaseState' } = {}) {
+  if (!mesh?.isObject3D) { return; }
+  storeMeshVisibilityBaseState(mesh, stateKey);
+  mesh.visible = Boolean(visible);
+}
+
+function restoreMeshVisible(mesh, { stateKey = 'visibleBaseState' } = {}) {
+  if (!mesh?.isObject3D) { return; }
+  const key = String(stateKey || 'visibleBaseState');
+  if (mesh.userData?.[key] == null) {
+    mesh.visible = true;
+    return;
   }
+  mesh.visible = Boolean(mesh.userData[key]);
+}
+
+function setMaterialOpacity(material, opacity, { stateKey = 'opacityBaseState' } = {}) {
+  if (!material || !('opacity' in material)) { return; }
+  storeMaterialOpacityBaseState(material, stateKey);
+  const baseState = material.userData?.[stateKey] || null;
   material.opacity = opacity;
   material.transparent = opacity < 1;
   if ('depthWrite' in material) {
-    material.depthWrite = opacity >= 0.999 && material?.userData?.groundBaseDepthWrite !== false;
+    material.depthWrite = opacity >= 0.999 && baseState?.depthWrite !== false;
   }
+  material.needsUpdate = true;
+}
+
+function restoreMaterialOpacity(material, { stateKey = 'opacityBaseState' } = {}) {
+  if (!material || !('opacity' in material)) { return; }
+  const baseState = material.userData?.[stateKey] || null;
+  material.opacity = Number.isFinite(baseState?.opacity) ? baseState.opacity : 1;
+  material.transparent = Boolean(baseState?.transparent);
+  if ('depthWrite' in material) {
+    material.depthWrite = baseState?.depthWrite !== false;
+  }
+  material.depthTest = true;
   material.needsUpdate = true;
 }
 
@@ -23576,6 +24552,38 @@ function updateGroundOpacityButtonState() {
   const materials = meshes.flatMap((mesh) => Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean);
   const isTransparent = materials.some((material) => typeof material?.opacity === 'number' && material.opacity < 0.99);
   toggleGroundOpacityButton.textContent = isTransparent ? 'ground戻す' : 'ground透過';
+}
+
+function updateUbldOpacityButtonState() {
+  if (!toggleUbldOpacityButton) { return; }
+  const isTransparent = getEffectiveUbldOpacitySetting() < 100;
+  toggleUbldOpacityButton.textContent = isTransparent ? 'ubld戻す' : 'ubld透過';
+}
+
+function applyUbldOpacitySetting(opacityPercent) {
+  const meshes = getUbldMeshes();
+  if (meshes.length < 1) { return false; }
+  const normalizedPercent = Math.min(100, Math.max(0, Number(opacityPercent) || 0));
+  const normalizedOpacity = normalizedPercent / 100;
+  meshes.forEach((mesh) => {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (normalizedPercent >= 100) {
+      restoreMeshVisible(mesh, { stateKey: 'ubldVisibleBaseState' });
+      restoreMeshRenderOrder(mesh, { stateKey: 'ubldRenderOrderBaseState' });
+      materials.filter(Boolean).forEach((material) => {
+        restoreMaterialOpacity(material, { stateKey: 'ubldOpacityBaseState' });
+      });
+      return;
+    }
+    setMeshVisible(mesh, normalizedPercent > 0, { stateKey: 'ubldVisibleBaseState' });
+    setMeshRenderOrder(mesh, 10, { stateKey: 'ubldRenderOrderBaseState' });
+    materials.filter(Boolean).forEach((material) => {
+      setMaterialOpacity(material, normalizedOpacity, { stateKey: 'ubldOpacityBaseState' });
+    });
+  });
+  refreshDifferenceSpaceLayering();
+  updateUbldOpacityButtonState();
+  return true;
 }
 
 function toggleGroundOpacity() {
@@ -23588,25 +24596,50 @@ function toggleGroundOpacity() {
   const shouldRestore = materials.some((material) => typeof material?.opacity === 'number' && material.opacity < 0.99);
   materials.forEach((material) => {
     if (shouldRestore) {
-      const baseOpacity = Number(material?.userData?.groundBaseOpacity);
-      material.opacity = Number.isFinite(baseOpacity) ? baseOpacity : 1;
-      material.transparent = Boolean(material?.userData?.groundBaseTransparent);
-      if ('depthWrite' in material) {
-        material.depthWrite = material?.userData?.groundBaseDepthWrite !== false;
-      }
-      material.depthTest = true;
-      material.needsUpdate = true;
+      restoreMaterialOpacity(material, { stateKey: 'groundOpacityBaseState' });
       return;
     }
-    setMaterialOpacity(material, 0.3);
+    setMaterialOpacity(material, 0.3, { stateKey: 'groundOpacityBaseState' });
   });
   applyRecommendedGroundSettings();
+  meshes.forEach((mesh) => {
+    if (shouldRestore) {
+      restoreMeshRenderOrder(mesh, { stateKey: 'groundRenderOrderBaseState' });
+      return;
+    }
+    setMeshRenderOrder(mesh, 10, { stateKey: 'groundRenderOrderBaseState' });
+  });
+  refreshDifferenceSpaceLayering();
   updateGroundOpacityButtonState();
   setMapLoadStatusText(
     shouldRestore
       ? `ground 表示を戻しました: ${meshes.length} 件`
       : `ground を透過しました: ${meshes.length} 件`
   );
+  return true;
+}
+
+function toggleUbldOpacity() {
+  if (getUbldMeshes().length < 1) {
+    setMapLoadStatusText('ubld 名のメッシュが見つかりません。');
+    return false;
+  }
+  const currentOpacity = getEffectiveUbldOpacitySetting();
+  const sceneOpacity = Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0));
+  if (currentOpacity >= 100) {
+    ubldOpacityButtonOverrideValue = sceneOpacity < 100 ? null : 60;
+  } else {
+    ubldOpacityButtonOverrideValue = 100;
+  }
+  applySceneVisibilitySettings({ save: true });
+  const nextOpacity = getEffectiveUbldOpacitySetting();
+  if (nextOpacity >= 100) {
+    setMapLoadStatusText('ubld を表示に戻しました。');
+  } else if (sceneOpacity < 100 && ubldOpacityButtonOverrideValue == null) {
+    setMapLoadStatusText(`ubld をシーン値 ${sceneOpacity} に戻しました。`);
+  } else {
+    setMapLoadStatusText(`ubld を透過しました: ${nextOpacity}`);
+  }
   return true;
 }
 
@@ -23658,6 +24691,70 @@ function setTrainStatus(text) {
 function setTrainPanelVisible(visible) {
   if (!trainPanel) { return; }
   trainPanel.style.display = visible ? 'block' : 'none';
+}
+
+function setAreaVisibilityPanelVisible(visible) {
+  if (!areaVisibilityPanel) { return; }
+  areaVisibilityPanel.style.display = visible ? 'block' : 'none';
+  if (visible) {
+    renderAreaVisibilityRows();
+    scheduleClampUiPanels();
+  }
+}
+
+function renderAreaVisibilityRows() {
+  if (!areaVisibilityList || !areaVisibilityStatus) { return; }
+  const groups = collectAreaSpaceGroups();
+  const hiddenNames = getHiddenAreaNames();
+  areaVisibilityList.innerHTML = '';
+  const names = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b, 'ja'));
+  if (names.length < 1) {
+    areaVisibilityStatus.textContent = 'Area: 0件';
+    const empty = document.createElement('div');
+    empty.style.fontSize = '11px';
+    empty.style.lineHeight = '1.5';
+    empty.style.color = '#40566f';
+    empty.textContent = 'Area空間がまだありません。';
+    areaVisibilityList.appendChild(empty);
+    return;
+  }
+  names.forEach((name) => {
+    const meshes = collectAreaStructureMeshesForAreaName(name);
+    const hidden = hiddenNames.has(name);
+    const row = document.createElement('div');
+    row.style.border = '1px solid rgba(41,71,107,0.18)';
+    row.style.borderRadius = '8px';
+    row.style.padding = '8px';
+    row.style.display = 'grid';
+    row.style.gap = '6px';
+    row.style.background = hidden ? 'rgba(255,244,235,0.96)' : 'rgba(245,249,255,0.92)';
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+    header.style.gap = '8px';
+    const title = document.createElement('div');
+    title.style.fontSize = '11px';
+    title.style.fontWeight = '700';
+    title.style.color = hidden ? '#8a4c08' : '#29476b';
+    title.textContent = name;
+    const toggleButton = document.createElement('button');
+    toggleButton.type = 'button';
+    toggleButton.dataset.areaVisibilityToggle = name;
+    toggleButton.style.fontSize = '10px';
+    toggleButton.textContent = hidden ? '表示' : '非表示';
+    header.appendChild(title);
+    header.appendChild(toggleButton);
+    const meta = document.createElement('div');
+    meta.style.fontSize = '10px';
+    meta.style.lineHeight = '1.4';
+    meta.style.color = '#40566f';
+    meta.textContent = `space ${groups.get(name)?.length || 0} / mesh ${meshes.length} / ${hidden ? 'hidden' : 'visible'}`;
+    row.appendChild(header);
+    row.appendChild(meta);
+    areaVisibilityList.appendChild(row);
+  });
+  areaVisibilityStatus.textContent = `Area: ${names.length}件 / hidden ${hiddenNames.size}件`;
 }
 
 function getTrainTrackOptions() {
@@ -24768,6 +25865,7 @@ function isDifferencePreviewHiddenEdgeByOverlap(p0, p1, maxDiag = 0) {
 
 function drawDifferencePreviewWireframe() {
   clearDifferencePreviewWireframeLines();
+  if (!shouldSceneShowDifferenceSpaceLines()) { return; }
   if (differenceViewMode !== 'preview') { return; }
   const spaces = getDifferenceDisplayMeshesForPreview({
     includeRailDisplays: shouldSceneShowDifferenceLineOverlapPreview(),
@@ -24852,13 +25950,16 @@ function applyDifferenceViewMode() {
     clearDifferencePreviewWireframeLines();
     clearDifferenceIntersectionVisuals();
     // move/add 系は加工後の可視線を再描画（tube 系は DifferencePreviewCutter をそのまま表示）。
-    if (differenceSpaceModeActive
+    if (shouldSceneShowDifferenceSpaceLines()
+      && differenceSpaceModeActive
       && (differenceSpaceTransformMode === 'move' || differenceSpaceTransformMode === 'add')) {
       refreshDifferenceIntersectionVisuals();
     }
   } else {
     clearDifferencePreviewWireframeLines();
-    refreshDifferenceSelectedEdgeHighlights();
+    if (shouldSceneShowDifferenceSpaceLines()) {
+      refreshDifferenceSelectedEdgeHighlights();
+    }
   }
 }
 
@@ -24872,6 +25973,7 @@ function refreshDifferenceIntersectionVisuals() {
 
   clearDifferenceIntersectionVisuals();
   clearDifferenceClassifiedSegments();
+  if (!shouldSceneShowDifferenceSpaceLines()) { return; }
   if (!differenceSpaceModeActive) { return; }
   // preview でも分類（黄/橙/赤）は必要。add/move で同じ計算を使う。
   if (differenceSpaceTransformMode !== 'move'
@@ -25077,8 +26179,12 @@ function clearDifferenceSelectionKindsExcept(kind = 'none') {
   syncDifferenceSelectionKind();
 }
 
-function setDifferenceBodySelectionMode(active) {
-  differenceBodySelectModeActive = Boolean(active);
+function setDifferenceBodySelectionMode(active, mode = null) {
+  const nextMode = active
+    ? ((mode === 'box' || (mode == null && differenceBodySelectionMode === 'box')) ? 'box' : 'single')
+    : 'none';
+  differenceBodySelectionMode = nextMode;
+  differenceBodySelectModeActive = nextMode !== 'none';
   setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
   if (differenceBodySelectModeActive) {
     clearDifferenceControlPointSelection();
@@ -25087,11 +26193,22 @@ function setDifferenceBodySelectionMode(active) {
     clearDifferenceFaceHighlight();
   } else {
     clearDifferenceBodySelection();
+    cancelDifferenceAreaBoxSelection();
   }
+  updateDifferenceAreaSelectionPanel();
   updateDifferenceSelectionStatus();
   refreshDifferenceSelectedEdgeHighlights();
   refreshDifferenceSelectedFaceHighlights();
   refreshDifferenceSelectedBodyHighlights();
+  if (differenceBodySelectModeActive) {
+    updateDifferenceStatus(
+      differenceBodySelectionMode === 'box'
+        ? 'body選択: クリックで複数空間を選択します。'
+        : 'body選択: 通常'
+    );
+  } else if (isDifferenceAreaSelectionPanelContext()) {
+    updateDifferenceStatus('body選択: 通常');
+  }
 }
 
 function getDifferenceEdgeKey(mesh, pointA, pointB) {
@@ -25486,6 +26603,7 @@ function distancePointToInfiniteLine(point, linePoint, lineDirNorm) {
 
 function rebuildDifferenceEdgeOverlapConstraints() {
   differenceEdgeOverlapConstraints.length = 0;
+  if (!shouldRunDifferenceHeavyAuxProcessing()) { return 0; }
   const spaces = getActiveDifferenceSpaces().filter((mesh) => shouldDifferenceMeshParticipateInSharedPointMerge(mesh));
   if (spaces.length < 1) { return 0; }
   const edges = spaces
@@ -25600,6 +26718,8 @@ function rebuildDifferenceEdgeOverlapConstraints() {
 }
 
 function applyDifferenceEdgeOverlapConstraints(dirtyMeshes = null) {
+  if (!shouldRunDifferenceHeavyAuxProcessing()) { return 0; }
+  if (!differenceAutoMergeEnabled) { return 0; }
   if (!Array.isArray(differenceEdgeOverlapConstraints) || differenceEdgeOverlapConstraints.length < 1) { return 0; }
   const usedDirty = dirtyMeshes || new Set();
   const touched = [];
@@ -25629,6 +26749,12 @@ function applyDifferenceEdgeOverlapConstraints(dirtyMeshes = null) {
 
 function refreshDifferenceSelectedEdgeHighlights() {
   clearDifferenceSelectedEdgeHighlights();
+  if (!shouldSceneShowDifferenceSpaceLines()) {
+    clearDifferencePreviewWireframeLines();
+    clearDifferenceIntersectionVisuals();
+    clearDifferenceClassifiedSegments();
+    return;
+  }
   refreshDifferenceIntersectionVisuals();
   if (differenceViewMode === 'preview') { return; }
   if (!differenceSpaceModeActive || !['move', 'rotation', 'scale'].includes(differenceSpaceTransformMode)) { return; }
@@ -26261,10 +27387,11 @@ function ensureDifferenceFaceSelected(mesh, localNormal, facePointLocal = null) 
   return true;
 }
 
-function toggleDifferenceBodySelection(mesh) {
+function toggleDifferenceBodySelection(mesh, options = {}) {
   if (!mesh?.userData?.differenceSpacePlane) { return false; }
+  const additive = options?.additive === true;
   const key = String(mesh.id);
-  if (!differenceSelectedBodies.has(key)) {
+  if (!additive && !differenceSelectedBodies.has(key)) {
     clearDifferenceSelectionKindsExcept('body');
   }
   if (differenceSelectedBodies.has(key)) {
@@ -26289,6 +27416,153 @@ function clearDifferenceBodySelection() {
   differenceSelectedBodies.clear();
   clearDifferenceSelectedBodyHighlights();
   syncDifferenceSelectionKind();
+}
+
+function isDifferenceBodyBoxSelectionMode() {
+  return differenceBodySelectModeActive
+    && differenceBodySelectionMode === 'box'
+    && isDifferenceAreaSelectionPanelContext();
+}
+
+function getDifferenceAreaSelectableMeshes() {
+  return getActiveDifferenceSpaces(activeSpaceEditRole)
+    .filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane)
+    .filter((mesh) => getSpaceRoleFromMesh(mesh) === activeSpaceEditRole);
+}
+
+function updateDifferenceAreaSelectionBoxOverlay() {
+  if (!differenceAreaSelectionBox) { return; }
+  if (!differenceAreaBoxSelectionActive || !differenceAreaBoxSelectionStartClient || !differenceAreaBoxSelectionCurrentClient) {
+    differenceAreaSelectionBox.style.display = 'none';
+    return;
+  }
+  const left = Math.min(differenceAreaBoxSelectionStartClient.x, differenceAreaBoxSelectionCurrentClient.x);
+  const top = Math.min(differenceAreaBoxSelectionStartClient.y, differenceAreaBoxSelectionCurrentClient.y);
+  const width = Math.abs(differenceAreaBoxSelectionCurrentClient.x - differenceAreaBoxSelectionStartClient.x);
+  const height = Math.abs(differenceAreaBoxSelectionCurrentClient.y - differenceAreaBoxSelectionStartClient.y);
+  differenceAreaSelectionBox.style.display = 'block';
+  differenceAreaSelectionBox.style.left = `${left}px`;
+  differenceAreaSelectionBox.style.top = `${top}px`;
+  differenceAreaSelectionBox.style.width = `${width}px`;
+  differenceAreaSelectionBox.style.height = `${height}px`;
+}
+
+function cancelDifferenceAreaBoxSelection() {
+  differenceAreaBoxSelectionActive = false;
+  differenceAreaBoxSelectionPointerMoved = false;
+  differenceAreaBoxSelectionStartClient = null;
+  differenceAreaBoxSelectionCurrentClient = null;
+  updateDifferenceAreaSelectionBoxOverlay();
+}
+
+function getProjectedScreenRectForDifferenceMesh(mesh) {
+  if (!mesh?.geometry || !mesh?.parent) { return null; }
+  const worldBox = getDifferenceMeshWorldBox(mesh);
+  if (!worldBox || worldBox.isEmpty()) { return null; }
+  const canvasRect = canvas?.getBoundingClientRect?.();
+  if (!canvasRect) { return null; }
+  const corners = [
+    new THREE.Vector3(worldBox.min.x, worldBox.min.y, worldBox.min.z),
+    new THREE.Vector3(worldBox.min.x, worldBox.min.y, worldBox.max.z),
+    new THREE.Vector3(worldBox.min.x, worldBox.max.y, worldBox.min.z),
+    new THREE.Vector3(worldBox.min.x, worldBox.max.y, worldBox.max.z),
+    new THREE.Vector3(worldBox.max.x, worldBox.min.y, worldBox.min.z),
+    new THREE.Vector3(worldBox.max.x, worldBox.min.y, worldBox.max.z),
+    new THREE.Vector3(worldBox.max.x, worldBox.max.y, worldBox.min.z),
+    new THREE.Vector3(worldBox.max.x, worldBox.max.y, worldBox.max.z),
+  ];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let hasVisibleCorner = false;
+  corners.forEach((corner) => {
+    const projected = corner.clone().project(camera);
+    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y) || !Number.isFinite(projected.z)) { return; }
+    const screenX = canvasRect.left + ((projected.x + 1) * 0.5 * canvasRect.width);
+    const screenY = canvasRect.top + ((1 - projected.y) * 0.5 * canvasRect.height);
+    minX = Math.min(minX, screenX);
+    minY = Math.min(minY, screenY);
+    maxX = Math.max(maxX, screenX);
+    maxY = Math.max(maxY, screenY);
+    if (projected.z >= -1.2 && projected.z <= 1.2) {
+      hasVisibleCorner = true;
+    }
+  });
+  if (!hasVisibleCorner || !Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+  return { left: minX, top: minY, right: maxX, bottom: maxY };
+}
+
+function rectsIntersectScreen(a, b) {
+  if (!a || !b) { return false; }
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+}
+
+function applyDifferenceBodyBoxSelectionFromScreenRect(screenRect) {
+  if (!screenRect) { return 0; }
+  const meshes = getDifferenceAreaSelectableMeshes();
+  clearDifferenceSelectionKindsExcept('body');
+  clearDifferenceBodySelection();
+  let lastSelectedMesh = null;
+  let count = 0;
+  meshes.forEach((mesh) => {
+    const meshRect = getProjectedScreenRectForDifferenceMesh(mesh);
+    if (!rectsIntersectScreen(screenRect, meshRect)) { return; }
+    differenceSelectedBodies.set(String(mesh.id), { mesh });
+    lastSelectedMesh = mesh;
+    count += 1;
+  });
+  refreshDifferenceSelectedBodyHighlights();
+  updateDifferenceSelectionStatus();
+  if (lastSelectedMesh) {
+    selectDifferencePlane(lastSelectedMesh);
+  }
+  updateDifferenceStatus(count > 0
+    ? `body選択[box]: ${count} 空間を選択`
+    : 'body選択[box]: 範囲内に空間がありません');
+  return count;
+}
+
+function beginDifferenceAreaBoxSelection(clientX, clientY) {
+  if (!isDifferenceBodyBoxSelectionMode()) { return false; }
+  differenceAreaBoxSelectionActive = true;
+  differenceAreaBoxSelectionPointerMoved = false;
+  differenceAreaBoxSelectionStartClient = { x: clientX, y: clientY };
+  differenceAreaBoxSelectionCurrentClient = { x: clientX, y: clientY };
+  efficacy = false;
+  updateDifferenceAreaSelectionBoxOverlay();
+  return true;
+}
+
+function updateDifferenceAreaBoxSelection(clientX, clientY) {
+  if (!differenceAreaBoxSelectionActive) { return false; }
+  differenceAreaBoxSelectionCurrentClient = { x: clientX, y: clientY };
+  const dx = clientX - (differenceAreaBoxSelectionStartClient?.x || clientX);
+  const dy = clientY - (differenceAreaBoxSelectionStartClient?.y || clientY);
+  if ((dx * dx + dy * dy) >= MOVE_CLICK_THRESHOLD * MOVE_CLICK_THRESHOLD) {
+    differenceAreaBoxSelectionPointerMoved = true;
+  }
+  updateDifferenceAreaSelectionBoxOverlay();
+  return true;
+}
+
+function finishDifferenceAreaBoxSelection() {
+  if (!differenceAreaBoxSelectionActive) { return false; }
+  const start = differenceAreaBoxSelectionStartClient;
+  const end = differenceAreaBoxSelectionCurrentClient;
+  const moved = differenceAreaBoxSelectionPointerMoved;
+  cancelDifferenceAreaBoxSelection();
+  efficacy = true;
+  if (!start || !end || !moved) { return true; }
+  applyDifferenceBodyBoxSelectionFromScreenRect({
+    left: Math.min(start.x, end.x),
+    top: Math.min(start.y, end.y),
+    right: Math.max(start.x, end.x),
+    bottom: Math.max(start.y, end.y),
+  });
+  return true;
 }
 
 function clearDifferenceMovePending() {
@@ -26385,17 +27659,20 @@ function applyDifferenceMovePendingSelection({ toggle = true } = {}) {
   }
   if (differenceMoveHitKind === 'body' && differenceMoveHitBody?.userData?.differenceSpacePlane) {
     const mesh = differenceMoveHitBody;
+    const additive = differenceBodySelectionMode === 'box';
     const selectionKey = buildDifferenceTransformSelectionKey({ mesh });
     const sameSelection = pointRotateTarget === mesh && isSameDifferenceTransformSelection(selectionKey);
     pointRotateTarget = mesh;
     selectDifferencePlane(mesh);
     let selected = false;
     if (toggle) {
-      selected = toggleDifferenceBodySelection(mesh);
+      selected = toggleDifferenceBodySelection(mesh, { additive });
     } else {
       const key = String(mesh.id);
       if (!differenceSelectedBodies.has(key)) {
-        clearDifferenceSelectionKindsExcept('body');
+        if (!additive) {
+          clearDifferenceSelectionKindsExcept('body');
+        }
         differenceSelectedBodies.set(key, { mesh });
         refreshDifferenceSelectedBodyHighlights();
         syncDifferenceSelectionKind();
@@ -26702,7 +27979,7 @@ function performDifferenceAddFromPointer() {
       setMeshListOpacity(targetObjects, 1);
       updateDifferenceStatus('面を押し出して空間を拡張しました。');
       differenceHoveredFaceHit = null;
-      refreshDifferencePreview();
+      refreshDifferencePreviewForTransformInteraction();
       refreshDifferenceSelectedEdgeHighlights();
       commitDifferenceHistoryIfNeeded();
       return true;
@@ -26730,7 +28007,7 @@ function performDifferenceAddFromPointer() {
   selectDifferencePlane(plane);
   targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
   setMeshListOpacity(targetObjects, 1);
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
   refreshDifferenceSelectedEdgeHighlights();
   updateDifferenceStatus('空き領域に空間ボックスを追加しました。');
   commitDifferenceHistoryIfNeeded();
@@ -26767,7 +28044,7 @@ function startDifferenceMoveDragFromPending() {
     const primaryMesh = targetSpec.primaryMesh || differenceMoveHitBody;
     const dragPoints = targetSpec.dragPoints;
     if (dragPoints.length < 1) { return false; }
-    if (movePointPanelActive) {
+    if (axisMoveOptions) {
       const primary = dragPoints[0] || null;
       const ok = beginDifferenceControlPointDrag(primary, dragPoints, axisMoveOptions || undefined);
       if (ok) {
@@ -26809,6 +28086,42 @@ function getDifferenceSpaceBoxOpacity() {
 
 function getDifferenceSpaceBoxRenderOrder() {
   return 2280;
+}
+
+function isAnyMeshListTransparent(meshes = []) {
+  return (Array.isArray(meshes) ? meshes : []).some((mesh) => {
+    const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
+    return materials.some((material) => typeof material?.opacity === 'number' && material.opacity < 0.99);
+  });
+}
+
+function isGroundTransparencyActive() {
+  return isAnyMeshListTransparent(getAllGroundMeshes());
+}
+
+function isUbldTransparencyActive() {
+  return isAnyMeshListTransparent(getUbldMeshes());
+}
+
+function shouldDifferenceSpacesUseSceneDepthSort() {
+  return isGroundTransparencyActive() || isUbldTransparencyActive();
+}
+
+function getDifferenceSpaceRenderOrder(mesh) {
+  if (shouldDifferenceSpacesUseSceneDepthSort()) {
+    return 0;
+  }
+  if (mesh?.userData?.differenceUnifiedResult || mesh?.userData?.differenceUseSceneDepthSort) {
+    return 0;
+  }
+  return getDifferenceSpaceBoxRenderOrder();
+}
+
+function refreshDifferenceSpaceLayering() {
+  differenceSpacePlanes.forEach((mesh) => {
+    if (!mesh?.parent || !mesh?.userData?.differenceSpacePlane) { return; }
+    applyDifferenceSpaceMeshStyle(mesh, { visible: mesh.visible !== false });
+  });
 }
 
 function getDifferenceControlPointOpacity() {
@@ -26888,7 +28201,12 @@ function loadDifferenceTexture(config = null) {
   return differenceTexturePromiseCache.get(cacheKey);
 }
 
-function createDifferenceSpaceMaterial(config = null) {
+function getSpaceRoleBaseColor(role = SPACE_ROLE_DIFFERENCE) {
+  return normalizeSpaceRole(role) === SPACE_ROLE_AREA ? 0xf59f00 : 0x2ed0c9;
+}
+
+function createDifferenceSpaceMaterial(config = null, role = SPACE_ROLE_DIFFERENCE) {
+  const normalizedRole = normalizeSpaceRole(role);
   const normalized = normalizeDifferenceTextureConfig(config);
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -26902,10 +28220,11 @@ function createDifferenceSpaceMaterial(config = null) {
   });
   material.userData = {
     ...(material.userData || {}),
+    differenceSpaceRole: normalizedRole,
     differenceTextureConfig: cloneDifferenceTextureConfig(normalized),
   };
   if (!normalized.path) {
-    material.color.set(0x2ed0c9);
+    material.color.set(getSpaceRoleBaseColor(normalizedRole));
   }
   return material;
 }
@@ -26918,7 +28237,7 @@ async function applyDifferenceTextureToMesh(mesh, config = null, { updateStatus 
   materials.forEach((material) => {
     if (!material) { return; }
     material.map = texture;
-    material.color.set(texture ? 0xffffff : 0x2ed0c9);
+    material.color.set(texture ? 0xffffff : getSpaceRoleBaseColor(getSpaceRoleFromMesh(mesh)));
     material.userData = {
       ...(material.userData || {}),
       differenceTextureConfig: cloneDifferenceTextureConfig(normalized),
@@ -26938,18 +28257,23 @@ async function applyDifferenceTextureToMesh(mesh, config = null, { updateStatus 
   return true;
 }
 
-function applyDifferenceSpaceMaterialStyle(material, { visible = true } = {}) {
+function applyDifferenceSpaceMaterialStyle(material, { visible = true, mesh = null } = {}) {
   if (!material) { return; }
   const projectionMaterial = material.userData?.differenceProjectionMaterial === true;
+  const role = normalizeSpaceRole(material.userData?.differenceSpaceRole);
+  const useBackSideDisplay = Boolean(mesh?.userData?.differenceUseBackSideDisplay);
   material.visible = visible;
   material.transparent = true;
   material.opacity = visible ? (projectionMaterial ? 1.0 : getDifferenceSpaceBoxOpacity()) : 0.0;
-  material.side = projectionMaterial ? THREE.BackSide : THREE.DoubleSide;
+  material.side = (projectionMaterial || useBackSideDisplay) ? THREE.BackSide : THREE.DoubleSide;
   if ('depthTest' in material) { material.depthTest = true; }
   if ('depthWrite' in material) { material.depthWrite = visible; }
   if ('metalness' in material) { material.metalness = 0.08; }
   if ('roughness' in material) { material.roughness = 0.58; }
   if ('flatShading' in material) { material.flatShading = false; }
+  if (!material.map) {
+    material.color.set(getSpaceRoleBaseColor(role));
+  }
   material.needsUpdate = true;
 }
 
@@ -27024,22 +28348,23 @@ function applyDifferenceOpenFacesToMesh(mesh) {
     if (!material) { return; }
     const faceKey = DIFFERENCE_FACE_KEYS[index] || '';
     const faceVisible = !(faceKey && faces[faceKey] === true);
-    applyDifferenceSpaceMaterialStyle(material, { visible: mesh.visible !== false && faceVisible });
+    applyDifferenceSpaceMaterialStyle(material, { visible: mesh.visible !== false && faceVisible, mesh });
   });
 }
 
 function applyDifferenceSpaceMeshStyle(mesh, { visible = true } = {}) {
   if (!mesh) { return; }
-  mesh.renderOrder = getDifferenceSpaceBoxRenderOrder();
+  // 一体化後メッシュは固定前面表示をやめ、通常の深度ソートに従わせる。
+  mesh.renderOrder = getDifferenceSpaceRenderOrder(mesh);
   mesh.visible = visible;
   if (isDifferenceOpenFacesSupportedMesh(mesh)) {
     applyDifferenceOpenFacesToMesh(mesh);
     return;
   }
   if (Array.isArray(mesh.material)) {
-    mesh.material.forEach((material) => applyDifferenceSpaceMaterialStyle(material, { visible }));
+    mesh.material.forEach((material) => applyDifferenceSpaceMaterialStyle(material, { visible, mesh }));
   } else {
-    applyDifferenceSpaceMaterialStyle(mesh.material, { visible });
+    applyDifferenceSpaceMaterialStyle(mesh.material, { visible, mesh });
   }
 }
 
@@ -27062,16 +28387,20 @@ function applyDifferenceControlPointMeshStyle(point, { visible = true } = {}) {
   }
 }
 
-function createDifferenceSpacePlane(position) {
+function createDifferenceSpacePlane(position, options = {}) {
+  const role = normalizeSpaceRole(options?.role || activeSpaceEditRole);
   const plane = new THREE.Mesh(
     new THREE.BoxGeometry(1, 1, 1),
-    createDifferenceSpaceMaterial(differenceDefaultTextureConfig),
+    createDifferenceSpaceMaterial(differenceDefaultTextureConfig, role),
   );
   plane.position.copy(position);
   plane.name = 'DifferenceSpacePlane';
   plane.userData = {
     ...(plane.userData || {}),
     differenceSpacePlane: true,
+    differenceSpaceRole: role,
+    areaName: role === SPACE_ROLE_AREA ? buildDefaultAreaSpaceName() : '',
+    areaStructureVisible: true,
     differenceProjectorType: 'box',
     differenceTexture: cloneDifferenceTextureConfig(differenceDefaultTextureConfig),
     differenceTargets: cloneDifferenceTargets(DEFAULT_DIFFERENCE_TARGETS),
@@ -27547,8 +28876,13 @@ function removeDifferenceSharedPointLink(a, b) {
   b.userData.sharedDifferencePoints = linksB.filter((p) => p && p !== a);
 }
 
-function getActiveDifferenceSpaces() {
-  return differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.geometry && mesh?.userData?.differenceSpacePlane);
+function getActiveDifferenceSpaces(role = null) {
+  const normalizedRole = role == null ? null : normalizeSpaceRole(role);
+  return differenceSpacePlanes.filter((mesh) => {
+    if (!(mesh?.parent && mesh?.geometry && mesh?.userData?.differenceSpacePlane)) { return false; }
+    if (!normalizedRole) { return true; }
+    return getSpaceRoleFromMesh(mesh) === normalizedRole;
+  });
 }
 
 function refreshDifferenceReadonlyTunnelPreviewChunkVisibility() {
@@ -27557,7 +28891,7 @@ function refreshDifferenceReadonlyTunnelPreviewChunkVisibility() {
     .filter((mesh) => mesh?.parent && mesh?.geometry && !isDifferenceReadonlyTunnelMesh(mesh))
     .map((mesh) => getDifferenceMeshWorldBox(mesh))
     .filter((box) => box?.isBox3);
-  const hasFilter = filterBoxes.length > 0;
+  const hasFilter = !viewModeActive && filterBoxes.length > 0;
 
   differenceSpacePlanes.forEach((mesh) => {
     if (!isDifferenceReadonlyTunnelMesh(mesh) || !mesh?.parent || !mesh?.geometry) { return; }
@@ -27771,6 +29105,9 @@ function getDifferenceMeshBoundaryControlPoints(mesh) {
 }
 
 function mergeOverlappedBoundaryControlPoints(threshold = differenceBoundaryMergeDistance, options = {}) {
+  if (!shouldRunDifferenceHeavyAuxProcessing()) {
+    return 0;
+  }
   if (!options?.force && !differenceAutoMergeEnabled) {
     rebuildDifferenceEdgeOverlapConstraints();
     return 0;
@@ -27929,12 +29266,13 @@ function updateDifferenceUnifyButtonState() {
   } catch (err) {
     isDifferenceContext = false;
   }
-  differenceUnifyButton.style.display = isDifferenceContext ? 'block' : 'none';
-  differenceUnifyButton.disabled = !isDifferenceContext;
+  const allowDifferenceOnlyTools = isDifferenceContext && activeSpaceEditRole === SPACE_ROLE_DIFFERENCE;
+  differenceUnifyButton.style.display = allowDifferenceOnlyTools ? 'block' : 'none';
+  differenceUnifyButton.disabled = !allowDifferenceOnlyTools;
   updateDifferenceResetBeforeUnifyButtonState();
   if (differenceViewToggleButton) {
-    differenceViewToggleButton.style.display = isDifferenceContext ? 'block' : 'none';
-    differenceViewToggleButton.disabled = !isDifferenceContext;
+    differenceViewToggleButton.style.display = allowDifferenceOnlyTools ? 'block' : 'none';
+    differenceViewToggleButton.disabled = !allowDifferenceOnlyTools;
   }
   updateDifferenceAutoMergeToggleButton();
   let viewModeReady = true;
@@ -27947,6 +29285,243 @@ function updateDifferenceUnifyButtonState() {
     differenceViewMode = 'diff';
     applyDifferenceViewMode();
   }
+}
+
+function canDuplicateDifferenceSpace(mesh) {
+  if (!mesh?.parent || !mesh?.userData?.differenceSpacePlane) { return false; }
+  if (isDifferenceRailDerivedMesh(mesh)) { return false; }
+  if (shouldSkipDifferenceSpaceInPersistentSave(mesh)) { return false; }
+  return true;
+}
+
+function getSelectedDifferenceSpaceForCopy() {
+  let selectedPlane = null;
+  try {
+    selectedPlane = differenceSelectedPlane;
+  } catch (err) {
+    selectedPlane = null;
+  }
+  return canDuplicateDifferenceSpace(selectedPlane) ? selectedPlane : null;
+}
+
+function getDifferenceControlPointsForMesh(mesh) {
+  if (!mesh?.userData?.differenceSpacePlane) { return []; }
+  return mesh.children.filter((child) => child?.userData?.differenceControlPoint && child.parent === mesh);
+}
+
+function collectDifferenceCopyConnectedMeshes(sourceMesh) {
+  if (!canDuplicateDifferenceSpace(sourceMesh)) { return []; }
+  const visitedMeshIds = new Set();
+  const queue = [sourceMesh];
+  const connected = [];
+  while (queue.length > 0) {
+    const mesh = queue.shift();
+    if (!canDuplicateDifferenceSpace(mesh) || visitedMeshIds.has(mesh.id)) { continue; }
+    visitedMeshIds.add(mesh.id);
+    connected.push(mesh);
+    getDifferenceControlPointsForMesh(mesh).forEach((point) => {
+      const links = Array.isArray(point.userData?.sharedDifferencePoints)
+        ? point.userData.sharedDifferencePoints
+        : [];
+      links.forEach((linkedPoint) => {
+        if (!linkedPoint?.userData?.differenceControlPoint || !linkedPoint.parent) { return; }
+        const linkedMesh = linkedPoint.userData?.parentDifferenceSpacePlane || linkedPoint.parent || null;
+        if (!canDuplicateDifferenceSpace(linkedMesh)) { return; }
+        if (!canDifferenceMeshesSharePoints(mesh, linkedMesh)) { return; }
+        if (!visitedMeshIds.has(linkedMesh.id)) {
+          queue.push(linkedMesh);
+        }
+      });
+    });
+  }
+  return connected;
+}
+
+function buildDifferenceSpaceCopyOffset(mesh) {
+  const bbox = new THREE.Box3().setFromObject(mesh);
+  const size = bbox.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 1);
+  const forward = camera.getWorldDirection(new THREE.Vector3()).setY(0);
+  if (forward.lengthSq() < 1e-8) {
+    forward.set(0, 0, -1);
+  } else {
+    forward.normalize();
+  }
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+  if (right.lengthSq() < 1e-8) {
+    right.set(1, 0, 0);
+  } else {
+    right.normalize();
+  }
+  return right.multiplyScalar(Math.max(1.5, span * 0.45))
+    .add(forward.clone().negate().multiplyScalar(Math.max(0.8, span * 0.2)));
+}
+
+function instantiateDifferenceSpaceFromSerializedState(rawSpace, { worldOffset = null } = {}) {
+  if (!rawSpace || typeof rawSpace !== 'object') { return null; }
+  const spaceRole = normalizeSpaceRole(rawSpace?.differenceSpaceRole || activeSpaceEditRole);
+  const useCanonicalBoxRestore = isCanonicalSerializedDifferenceBoxSpace(rawSpace);
+  let geometry = null;
+  if (!useCanonicalBoxRestore) {
+    geometry = buildGeometryFromSerializedSpace(rawSpace);
+    if (!geometry) { return null; }
+  }
+
+  const pos = Array.isArray(rawSpace.position) ? rawSpace.position : [0, 0, 0];
+  const quat = Array.isArray(rawSpace.quaternion) ? rawSpace.quaternion : [0, 0, 0, 1];
+  const scl = Array.isArray(rawSpace.scale) ? rawSpace.scale : [1, 1, 1];
+  const mesh = useCanonicalBoxRestore
+    ? createDifferenceSpacePlane(new THREE.Vector3(Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0), { role: spaceRole })
+    : createDifferenceSpaceMeshFromGeometry(geometry, null, { role: spaceRole });
+  if (!mesh) {
+    geometry?.dispose?.();
+    return null;
+  }
+  if (useCanonicalBoxRestore) {
+    addDifferenceControlPoints(mesh);
+  }
+
+  const offset = worldOffset?.isVector3 ? worldOffset : null;
+  mesh.position.set(
+    (Number(pos[0]) || 0) + (offset?.x || 0),
+    (Number(pos[1]) || 0) + (offset?.y || 0),
+    (Number(pos[2]) || 0) + (offset?.z || 0),
+  );
+  mesh.quaternion.set(Number(quat[0]) || 0, Number(quat[1]) || 0, Number(quat[2]) || 0, Number(quat[3]) || 1);
+  mesh.scale.set(Number(scl[0]) || 1, Number(scl[1]) || 1, Number(scl[2]) || 1);
+  mesh.userData = {
+    ...(mesh.userData || {}),
+    differenceSpaceRole: spaceRole,
+    areaName: spaceRole === SPACE_ROLE_AREA
+      ? normalizeAreaSpaceName(rawSpace?.areaName, getAreaSpaceName(mesh))
+      : '',
+    areaStructureVisible: rawSpace?.areaStructureVisible !== false,
+    differenceTexture: cloneDifferenceTextureConfig(rawSpace?.differenceTexture || null),
+    differenceProjectorType: String(rawSpace?.differenceProjectorType || '').trim() || 'box',
+    differenceTubeCurvePoints: Array.isArray(rawSpace?.differenceTubeCurvePoints) ? rawSpace.differenceTubeCurvePoints.slice() : null,
+    differenceTubeRadius: Number(rawSpace?.differenceTubeRadius) || 0,
+    differenceTargets: cloneDifferenceTargets(rawSpace?.differenceTargets || DEFAULT_DIFFERENCE_TARGETS),
+    differenceOpenFaces: normalizeDifferenceOpenFaces(rawSpace?.differenceOpenFaces || null),
+    differenceCornerVertexMap: null,
+  };
+  applyDifferenceOpenFacesToMesh(mesh);
+  void applyDifferenceTextureToMesh(mesh, mesh.userData?.differenceTexture);
+  mesh.updateMatrixWorld(true);
+  if (!useCanonicalBoxRestore) {
+    rebuildDifferenceControlPointsFromGeometry(mesh);
+    syncDifferenceGeometryFromControlPoints(mesh);
+    mergeCoincidentDifferenceControlPoints(mesh);
+    pruneDifferenceControlPointsByMeaningfulEdges(mesh);
+  } else {
+    updateDifferenceControlPointMarkerTransform(mesh);
+  }
+  return mesh;
+}
+
+function updateDifferenceCopyButtonState() {
+  if (!differenceCopyButton) { return; }
+  let isDifferenceContext = false;
+  let isRotationPanelVisible = false;
+  try {
+    isDifferenceContext = (editObject === 'DIFFERENCE_SPACE') || differenceSpaceModeActive;
+    isRotationPanelVisible = Boolean(rotationPanel && rotationPanel.style.display !== 'none');
+  } catch (err) {
+    isDifferenceContext = false;
+    isRotationPanelVisible = false;
+  }
+  const visible = isDifferenceContext
+    && isRotationPanelVisible
+    && differenceSpaceTransformMode !== 'line';
+  differenceCopyButton.style.display = visible ? 'block' : 'none';
+  differenceCopyButton.disabled = !getSelectedDifferenceSpaceForCopy();
+}
+
+function relinkDifferenceSharedPointsWithinMeshes(meshes, eps = differenceSharedPointLinkEpsilon) {
+  const meshSet = new Set((Array.isArray(meshes) ? meshes : []).filter((mesh) => mesh?.parent && mesh?.userData?.differenceSpacePlane));
+  if (meshSet.size < 2) { return 0; }
+  const points = [];
+  meshSet.forEach((mesh) => {
+    getDifferenceControlPointsForMesh(mesh).forEach((point) => points.push(point));
+  });
+  let linked = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const aw = a.getWorldPosition(new THREE.Vector3());
+    for (let j = i + 1; j < points.length; j += 1) {
+      const b = points[j];
+      if (a.parent === b.parent) { continue; }
+      const bw = b.getWorldPosition(new THREE.Vector3());
+      if (aw.distanceToSquared(bw) > eps * eps) { continue; }
+      if (addDifferenceSharedPointLink(a, b)) {
+        linked += 1;
+      }
+    }
+  }
+  return linked;
+}
+
+function duplicateSelectedDifferenceSpace() {
+  const sourceMesh = getSelectedDifferenceSpaceForCopy();
+  if (!sourceMesh) {
+    updateDifferenceStatus('copy: 編集可能な空間を1つ選択してください。');
+    updateDifferenceCopyButtonState();
+    return null;
+  }
+  const serialized = serializeDifferenceSpaceMesh(sourceMesh);
+  if (!serialized) {
+    updateDifferenceStatus('copy: 空間の複製データを作成できませんでした。');
+    updateDifferenceCopyButtonState();
+    return null;
+  }
+  beginDifferenceHistorySession();
+  const connectedMeshes = collectDifferenceCopyConnectedMeshes(sourceMesh);
+  const sourceMeshes = connectedMeshes.length > 0 ? connectedMeshes : [sourceMesh];
+  const worldOffset = buildDifferenceSpaceCopyOffset(sourceMesh);
+  const duplicatedMeshes = [];
+  for (let i = 0; i < sourceMeshes.length; i += 1) {
+    const duplicatedMesh = instantiateDifferenceSpaceFromSerializedState(
+      serializeDifferenceSpaceMesh(sourceMeshes[i]),
+      { worldOffset },
+    );
+    if (!duplicatedMesh) {
+      duplicatedMeshes.forEach((mesh) => removeDifferenceSpaceMeshForUnify(mesh));
+      differenceHistoryStartSnapshot = null;
+      updateDifferenceStatus('copy: 空間の複製に失敗しました。');
+      updateDifferenceCopyButtonState();
+      return null;
+    }
+    duplicatedMeshes.push(duplicatedMesh);
+  }
+  const duplicatedMesh = duplicatedMeshes[duplicatedMeshes.length - 1] || null;
+  if (!duplicatedMesh) {
+    differenceHistoryStartSnapshot = null;
+    updateDifferenceStatus('copy: 空間の複製に失敗しました。');
+    updateDifferenceCopyButtonState();
+    return null;
+  }
+  relinkDifferenceSharedPointsWithinMeshes(duplicatedMeshes);
+  mergeOverlappedBoundaryControlPoints(differenceBoundaryMergeDistance, { force: true });
+  rebuildDifferenceEdgeOverlapConstraints();
+  targetObjects = differenceSpacePlanes.filter((mesh) => mesh?.parent && !isDifferenceRailDerivedMesh(mesh));
+  setMeshListOpacity(targetObjects, 1);
+  clearDifferenceSelectionKindsExcept('body');
+  clearDifferenceBodySelection();
+  duplicatedMeshes.forEach((mesh) => {
+    differenceSelectedBodies.set(String(mesh.id), { mesh });
+  });
+  refreshDifferenceSelectedBodyHighlights();
+  updateDifferenceSelectionStatus();
+  selectDifferencePlane(duplicatedMesh);
+  refreshDifferencePreview();
+  refreshDifferenceSelectedEdgeHighlights();
+  commitDifferenceHistoryIfNeeded();
+  updateDifferenceStatus(
+    duplicatedMeshes.length > 1
+      ? `copy: 結合空間 ${duplicatedMeshes.length} 件を複製しました。`
+      : `copy: 空間 ${sourceMesh.id} を複製しました。`
+  );
+  updateDifferenceCopyButtonState();
+  return duplicatedMesh;
 }
 
 function removeDifferenceSpaceMeshForUnify(mesh) {
@@ -27983,6 +29558,7 @@ function removeDifferenceSpaceMeshForUnify(mesh) {
   if (idx >= 0) {
     differenceSpacePlanes.splice(idx, 1);
   }
+  updateDifferenceCopyButtonState();
   return true;
 }
 
@@ -28418,95 +29994,99 @@ function simplifyCoplanarPatchesToPlanes(geometry, options = {}) {
 }
 
 function runHighQualityDifferenceUnify() {
-  const spaces = getActiveDifferenceSpaces();
-  if (spaces.length < 2) {
-    updateDifferenceStatus('高品質一体化: 空間が2つ以上必要です。');
-    updateDifferenceUnifyButtonState();
-    return false;
-  }
-  differenceSnapshotBeforeLatestUnify = structuredClone(captureDifferenceUnifySnapshot());
-  updateDifferenceResetBeforeUnifyButtonState();
-  scene.updateMatrixWorld(true);
-  const activeMeshes = spaces.filter((mesh) => mesh?.parent && mesh?.geometry);
-  if (activeMeshes.length < 2) {
-    updateDifferenceStatus('高品質一体化: 空間が2つ以上必要です。');
-    updateDifferenceUnifyButtonState();
-    return false;
-  }
-
-  const contexts = activeMeshes
-    .map((mesh, index) => createDifferenceSpaceContext(mesh, String(mesh.userData?.differenceTextureId || `${mesh.id}_${index}`)))
-    .filter(Boolean);
-
-  let mergedGeometry = activeMeshes[0].geometry.clone().applyMatrix4(activeMeshes[0].matrixWorld);
-  try {
-    for (let i = 1; i < activeMeshes.length; i += 1) {
-      const nextGeometry = activeMeshes[i].geometry.clone().applyMatrix4(activeMeshes[i].matrixWorld);
-      const result = differenceCsgEvaluator.evaluate(
-        new Brush(mergedGeometry),
-        new Brush(nextGeometry),
-        ADDITION,
-      );
-      mergedGeometry.dispose?.();
-      nextGeometry.dispose?.();
-      if (!result?.geometry) {
-        updateDifferenceStatus('高品質一体化: 一体化に失敗しました。');
-        return false;
-      }
-      mergedGeometry = result.geometry;
+  return runWithDifferenceHeavyAuxProcessing(() => {
+    const spaces = getActiveDifferenceSpaces();
+    if (spaces.length < 2) {
+      updateDifferenceStatus('高品質一体化: 空間が2つ以上必要です。');
+      updateDifferenceUnifyButtonState();
+      return false;
     }
-  } catch (err) {
-    console.warn('Difference union failed', err);
-    mergedGeometry.dispose?.();
-    updateDifferenceStatus('高品質一体化: 一体化に失敗しました。');
-    return false;
-  }
+    differenceSnapshotBeforeLatestUnify = structuredClone(captureDifferenceUnifySnapshot());
+    updateDifferenceResetBeforeUnifyButtonState();
+    scene.updateMatrixWorld(true);
+    const activeMeshes = spaces.filter((mesh) => mesh?.parent && mesh?.geometry);
+    if (activeMeshes.length < 2) {
+      updateDifferenceStatus('高品質一体化: 空間が2つ以上必要です。');
+      updateDifferenceUnifyButtonState();
+      return false;
+    }
 
-  mergedGeometry.computeVertexNormals();
-  mergedGeometry.computeBoundingBox?.();
-  mergedGeometry.computeBoundingSphere?.();
+    const contexts = activeMeshes
+      .map((mesh, index) => createDifferenceSpaceContext(mesh, String(mesh.userData?.differenceTextureId || `${mesh.id}_${index}`)))
+      .filter(Boolean);
 
-  const previousSpaces = activeMeshes.slice();
-  previousSpaces.forEach((mesh) => {
-    removeDifferenceSpaceMeshForUnify(mesh);
+    let mergedGeometry = activeMeshes[0].geometry.clone().applyMatrix4(activeMeshes[0].matrixWorld);
+    try {
+      for (let i = 1; i < activeMeshes.length; i += 1) {
+        const nextGeometry = activeMeshes[i].geometry.clone().applyMatrix4(activeMeshes[i].matrixWorld);
+        const result = differenceCsgEvaluator.evaluate(
+          new Brush(mergedGeometry),
+          new Brush(nextGeometry),
+          ADDITION,
+        );
+        mergedGeometry.dispose?.();
+        nextGeometry.dispose?.();
+        if (!result?.geometry) {
+          updateDifferenceStatus('高品質一体化: 一体化に失敗しました。');
+          return false;
+        }
+        mergedGeometry = result.geometry;
+      }
+    } catch (err) {
+      console.warn('Difference union failed', err);
+      mergedGeometry.dispose?.();
+      updateDifferenceStatus('高品質一体化: 一体化に失敗しました。');
+      return false;
+    }
+
+    mergedGeometry.computeVertexNormals();
+    mergedGeometry.computeBoundingBox?.();
+    mergedGeometry.computeBoundingSphere?.();
+
+    const previousSpaces = activeMeshes.slice();
+    previousSpaces.forEach((mesh) => {
+      removeDifferenceSpaceMeshForUnify(mesh);
+    });
+
+    const unifiedMesh = new THREE.Mesh(mergedGeometry, createDifferenceSpaceMaterial(null));
+    unifiedMesh.name = 'DifferenceUnifiedSpace';
+    unifiedMesh.position.set(0, 0, 0);
+    unifiedMesh.quaternion.identity();
+    unifiedMesh.scale.set(1, 1, 1);
+    unifiedMesh.userData = {
+      ...(unifiedMesh.userData || {}),
+      differenceSpacePlane: true,
+      differenceUnifiedResult: true,
+      differenceReadonlyDisplay: true,
+      differenceUseBackSideDisplay: true,
+      differenceUseSceneDepthSort: true,
+      differenceTexture: cloneDifferenceTextureConfig(null),
+    };
+    applyDifferenceSpaceMeshStyle(unifiedMesh, { visible: true });
+    scene.add(unifiedMesh);
+    differenceSpacePlanes.push(unifiedMesh);
+
+    const assignmentStats = applyDifferenceMultiTextureFromContexts(unifiedMesh, contexts);
+
+    rebuildDifferenceEdgeOverlapConstraints();
+    clearDifferenceFaceSelection();
+    clearDifferenceEdgeSelection();
+    clearDifferenceControlPointSelection();
+    selectDifferencePlane(null);
+    targetObjects = getActiveDifferenceSpaces();
+    setMeshListOpacity(targetObjects, 1);
+    refreshDifferencePreviewForTransformInteraction();
+    refreshDifferenceSelectedEdgeHighlights();
+    updateDifferenceStatus(
+      '一体化完了。\n'
+      + '統合後メッシュに対して、box は box projection、tube は curve-based cylindrical projection で分類しています。\n'
+      + `strict match: ${assignmentStats.matchedTriangleCount} / fallback: ${assignmentStats.fallbackTriangleCount} / total: ${assignmentStats.totalTriangleCount}\n`
+      + 'fallback は元面に厳密一致しない三角形を、最も近い source face へ寄せたものです。\n'
+      + '「一体化前に戻る」で復元できます。',
+    );
+    updateDifferenceUnifyButtonState();
+    return true;
   });
-
-  const unifiedMesh = new THREE.Mesh(mergedGeometry, createDifferenceSpaceMaterial(null));
-  unifiedMesh.name = 'DifferenceUnifiedSpace';
-  unifiedMesh.position.set(0, 0, 0);
-  unifiedMesh.quaternion.identity();
-  unifiedMesh.scale.set(1, 1, 1);
-  unifiedMesh.userData = {
-    ...(unifiedMesh.userData || {}),
-    differenceSpacePlane: true,
-    differenceUnifiedResult: true,
-    differenceReadonlyDisplay: true,
-    differenceTexture: cloneDifferenceTextureConfig(null),
-  };
-  applyDifferenceSpaceMeshStyle(unifiedMesh, { visible: true });
-  scene.add(unifiedMesh);
-  differenceSpacePlanes.push(unifiedMesh);
-
-  const assignmentStats = applyDifferenceMultiTextureFromContexts(unifiedMesh, contexts);
-
-  rebuildDifferenceEdgeOverlapConstraints();
-  clearDifferenceFaceSelection();
-  clearDifferenceEdgeSelection();
-  clearDifferenceControlPointSelection();
-  selectDifferencePlane(null);
-  targetObjects = getActiveDifferenceSpaces();
-  setMeshListOpacity(targetObjects, 1);
-  refreshDifferencePreview();
-  refreshDifferenceSelectedEdgeHighlights();
-  updateDifferenceStatus(
-    '一体化完了。\n'
-    + '統合後メッシュに対して、box は box projection、tube は curve-based cylindrical projection で分類しています。\n'
-    + `strict match: ${assignmentStats.matchedTriangleCount} / fallback: ${assignmentStats.fallbackTriangleCount} / total: ${assignmentStats.totalTriangleCount}\n`
-    + 'fallback は元面に厳密一致しない三角形を、最も近い source face へ寄せたものです。\n'
-    + '「一体化前に戻る」で復元できます。',
-  );
-  updateDifferenceUnifyButtonState();
-  return true;
 }
 
 function showDifferenceMergeNoticeAt(worldPos, text = '結合しました') {
@@ -28530,6 +30110,7 @@ function showDifferenceMergeNoticeAt(worldPos, text = '結合しました') {
 }
 
 function autoMergeNearbyDifferencePoints(changedPoints = [], threshold = differenceAutoMergeDistance, options = {}) {
+  if (!shouldRunDifferenceHeavyAuxProcessing()) { return 0; }
   if (!options?.force && !differenceAutoMergeEnabled) { return 0; }
   const candidatePoints = (Array.isArray(changedPoints) && changedPoints.length > 0)
     ? changedPoints
@@ -28629,6 +30210,7 @@ function linkDifferenceSharedBoundaryPoints(sourceMesh, newMesh, sourceFaceLocal
 }
 
 function propagateDifferenceSharedPoints(points, dirtyMeshes = null) {
+  if (!shouldRunDifferenceHeavyAuxProcessing()) { return; }
   if (!Array.isArray(points) || points.length < 1) { return; }
   const queue = points.filter((p) => p?.userData?.differenceControlPoint);
   const visited = new Set();
@@ -28722,16 +30304,21 @@ function buildExtrudePrismGeometryFromFacePoints(mesh, facePoints, worldNormal, 
   return welded;
 }
 
-function createDifferenceSpaceMeshFromGeometry(geometry, referenceMesh = null) {
+function createDifferenceSpaceMeshFromGeometry(geometry, referenceMesh = null, options = {}) {
   if (!geometry) { return null; }
+  const role = normalizeSpaceRole(options?.role || referenceMesh?.userData?.differenceSpaceRole || activeSpaceEditRole);
   const mat = (referenceMesh?.material && referenceMesh.material.clone)
     ? referenceMesh.material.clone()
-    : createDifferenceSpaceMaterial(referenceMesh?.userData?.differenceTexture || differenceDefaultTextureConfig);
+    : createDifferenceSpaceMaterial(referenceMesh?.userData?.differenceTexture || differenceDefaultTextureConfig, role);
+  if (mat?.userData) {
+    mat.userData.differenceSpaceRole = role;
+  }
   const mesh = new THREE.Mesh(geometry, mat);
   mesh.name = 'DifferenceSpacePlane';
   mesh.userData = {
     ...(mesh.userData || {}),
     differenceSpacePlane: true,
+    differenceSpaceRole: role,
     differenceTexture: cloneDifferenceTextureConfig(
       referenceMesh?.userData?.differenceTexture || differenceDefaultTextureConfig,
     ),
@@ -28928,12 +30515,14 @@ function updateDifferenceTextureControlsVisibility() {
 
 function updateDifferenceTargetPanelVisibility() {
   if (!differenceTargetPanel) { return; }
-  differenceTargetPanel.style.display = differenceSpaceModeActive ? 'block' : 'none';
+  const visible = differenceSpaceModeActive && differenceSpaceTransformMode === 'texture';
+  differenceTargetPanel.style.display = visible ? 'block' : 'none';
 }
 
 function updateDifferenceFacePanelVisibility() {
   if (!differenceFacePanel) { return; }
-  differenceFacePanel.style.display = differenceSpaceModeActive ? 'block' : 'none';
+  const visible = differenceSpaceModeActive && differenceSpaceTransformMode === 'texture';
+  differenceFacePanel.style.display = visible ? 'block' : 'none';
 }
 
 function formatDifferenceOpenFaceSummary(rawFaces = null) {
@@ -29150,19 +30739,141 @@ function clearDifferenceTargetSelectionsForActiveMesh() {
   return true;
 }
 
+function isAreaStructurePanelContext() {
+  return editObject === 'DIFFERENCE_SPACE'
+    && differenceSpaceModeActive
+    && activeSpaceEditRole === SPACE_ROLE_AREA;
+}
+
+function syncAreaStructurePanelFromSelection() {
+  if (!areaStructureSummary) { return; }
+  const targetMesh = getAreaEditableTargetMesh();
+  if (areaStructureNameInput) {
+    areaStructureNameInput.value = targetMesh ? getAreaSpaceName(targetMesh) : '';
+    areaStructureNameInput.disabled = !targetMesh;
+  }
+  if (areaStructureRenameButton) {
+    areaStructureRenameButton.disabled = !targetMesh;
+  }
+  if (areaStructureHideButton) {
+    areaStructureHideButton.disabled = !targetMesh;
+  }
+  if (areaStructureShowButton) {
+    areaStructureShowButton.disabled = !targetMesh;
+  }
+  if (!targetMesh) {
+    areaStructureSummary.textContent = 'Area空間を選択すると、範囲内メッシュの表示/非表示を試せます。';
+    return;
+  }
+  const meshes = collectAreaStructureMeshesForSpace(targetMesh);
+  const hiddenCount = meshes.filter((mesh) => mesh?.visible === false).length;
+  areaStructureSummary.textContent = `${getAreaSpaceName(targetMesh)} / 範囲内 ${meshes.length} mesh / hidden ${hiddenCount}`;
+}
+
+function updateAreaStructurePanelVisibility() {
+  if (!areaStructurePanel) { return; }
+  const visible = isAreaStructurePanelContext();
+  areaStructurePanel.style.display = visible ? 'block' : 'none';
+  syncAreaStructurePanelFromSelection();
+  if (visible) {
+    scheduleClampUiPanels();
+  }
+}
+
+function ensureAreaStructureControls() {
+  if (areaStructurePanel || !differencePanel || !differenceStatus) { return; }
+  const wrap = document.createElement('div');
+  wrap.id = 'area-structure-panel';
+  wrap.setAttribute('role', 'region');
+  wrap.setAttribute('aria-label', 'Area Structure Visibility');
+  wrap.style.position = 'fixed';
+  wrap.style.right = '290px';
+  wrap.style.top = '720px';
+  wrap.style.width = '260px';
+  wrap.style.padding = '12px';
+  wrap.style.background = 'rgba(255,255,255,0.92)';
+  wrap.style.borderRadius = '10px';
+  wrap.style.boxShadow = '0 8px 20px rgba(0,0,0,0.25)';
+  wrap.style.zIndex = '10003';
+  wrap.style.display = 'none';
+  wrap.style.pointerEvents = 'auto';
+  wrap.style.border = '1px solid rgba(246, 176, 88, 0.45)';
+  wrap.style.color = '#1a2533';
+  wrap.innerHTML = `
+    <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:#6b3c00;">Area Structure</div>
+    <div style="display:flex;gap:6px;margin-bottom:6px;">
+      <input id="area-structure-name" type="text" placeholder="Area name" style="flex:1;padding:6px 8px;box-sizing:border-box;">
+      <button id="area-structure-rename" type="button" style="padding:6px 8px;">名前適用</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+      <button id="area-structure-hide" type="button" style="padding:6px 8px;">範囲内を非表示</button>
+      <button id="area-structure-show" type="button" style="padding:6px 8px;">範囲内を表示</button>
+      <button id="area-structure-show-all" type="button" style="padding:6px 8px;">全表示</button>
+    </div>
+    <div id="area-structure-summary" style="font-size:10px;line-height:1.4;color:#40566f;">Area空間を選択すると、範囲内メッシュの表示/非表示を試せます。</div>
+  `;
+  const uiLayer = document.getElementById('three-ui');
+  if (uiLayer) {
+    uiLayer.appendChild(wrap);
+  } else {
+    document.body.appendChild(wrap);
+  }
+  areaStructurePanel = wrap;
+  areaStructureNameInput = wrap.querySelector('#area-structure-name');
+  areaStructureRenameButton = wrap.querySelector('#area-structure-rename');
+  areaStructureHideButton = wrap.querySelector('#area-structure-hide');
+  areaStructureShowButton = wrap.querySelector('#area-structure-show');
+  areaStructureShowAllButton = wrap.querySelector('#area-structure-show-all');
+  areaStructureSummary = wrap.querySelector('#area-structure-summary');
+
+  areaStructureRenameButton?.addEventListener('click', () => {
+    const targetMesh = getAreaEditableTargetMesh();
+    if (!targetMesh) {
+      updateDifferenceStatus('Area名変更: Area空間を1つ選択してください。');
+      return;
+    }
+    const nextName = setAreaSpaceName(targetMesh, areaStructureNameInput?.value);
+    updateDifferenceStatus(`Area名を更新: ${nextName}`);
+    syncAreaStructurePanelFromSelection();
+  });
+  areaStructureNameInput?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') { return; }
+    event.preventDefault();
+    areaStructureRenameButton?.click();
+  });
+  areaStructureHideButton?.addEventListener('click', () => {
+    setAreaStructureMeshesVisibleByArea(getAreaEditableTargetMesh(), false);
+    syncAreaStructurePanelFromSelection();
+  });
+  areaStructureShowButton?.addEventListener('click', () => {
+    setAreaStructureMeshesVisibleByArea(getAreaEditableTargetMesh(), true);
+    syncAreaStructurePanelFromSelection();
+  });
+  areaStructureShowAllButton?.addEventListener('click', () => {
+    showAllAreaManagedStructureMeshes();
+    syncAreaStructurePanelFromSelection();
+  });
+  updateAreaStructurePanelVisibility();
+}
+
 function updateDifferenceModePanels() {
   ensureDifferenceTargetControls();
   ensureDifferenceFaceControls();
+  ensureAreaStructureControls();
   if (differencePanel) {
-    const showDifferencePanel = differenceSpaceModeActive;
+    const showDifferencePanel = differenceSpaceModeActive && differenceSpaceTransformMode === 'line';
     differencePanel.style.display = showDifferencePanel ? 'block' : 'none';
   }
   updateDifferenceTargetPanelVisibility();
   updateDifferenceFacePanelVisibility();
+  updateAreaStructurePanelVisibility();
+  renderAreaVisibilityRows();
   syncDifferenceTargetControlsFromSelection();
   syncDifferenceFaceControlsFromSelection();
   syncDifferenceReadonlyTunnelTexturePickability();
   updateDifferenceTextureControlsVisibility();
+  updateDifferenceCopyButtonState();
+  updateDifferenceAreaSelectionPanel();
 }
 
 function ensureDifferenceTargetControls() {
@@ -29391,10 +31102,12 @@ function selectDifferencePlane(mesh) {
   refreshDifferenceTextureSelectionInfo(differenceSelectedPlane);
   syncDifferenceTargetControlsFromSelection();
   syncDifferenceFaceControlsFromSelection();
+  syncAreaStructurePanelFromSelection();
+  updateDifferenceCopyButtonState();
 }
 
 function getDifferenceSelectedPoints() {
-  const planes = differenceSpacePlanes.filter((mesh) => mesh?.parent);
+  const planes = getActiveDifferenceSpaces(activeSpaceEditRole);
   if (planes.length === 1) {
     const mesh = planes[0];
     const center = mesh.position.clone();
@@ -29504,7 +31217,7 @@ function buildDifferenceCutterMesh(points, { shapeType = 'tube', pathType = 'smo
 }
 
 function buildDifferenceCutterMeshFromSpaces() {
-  const spaces = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.geometry);
+  const spaces = getActiveDifferenceSpaces(SPACE_ROLE_DIFFERENCE);
   return buildDifferenceCutterMeshFromMeshList(spaces);
 }
 
@@ -29649,7 +31362,7 @@ function updateDifferenceStatus(text) {
 function refreshDifferencePreview() {
   clearDifferencePreviewTube();
   const points = getDifferenceSelectedPoints();
-  if (!differenceSpaceModeActive) {
+  if (!differenceSpaceModeActive || activeSpaceEditRole !== SPACE_ROLE_DIFFERENCE) {
     updateDifferenceUnifyButtonState();
     applyDifferenceViewMode();
     return false;
@@ -29682,6 +31395,15 @@ function refreshDifferencePreview() {
   updateDifferenceUnifyButtonState();
   applyDifferenceViewMode();
   return true;
+}
+
+function refreshDifferencePreviewForTransformInteraction() {
+  if (editObject === 'DIFFERENCE_SPACE'
+    && ['move', 'rotation', 'scale'].includes(differenceSpaceTransformMode)) {
+    updateDifferenceUnifyButtonState();
+    return false;
+  }
+  return refreshDifferencePreview();
 }
 
 function applyDifferenceToMeshList(cutterMesh, targetMeshes = []) {
@@ -29996,9 +31718,9 @@ function isCanonicalSerializedDifferenceBoxSpace(rawSpace) {
   return isCanonical;
 }
 
-function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, applyToCity = true } = {}) {
+function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, applyToCity = true, includeRailOperations = true, defaultRole = SPACE_ROLE_DIFFERENCE } = {}) {
   const spaces = Array.isArray(payload?.differenceSpaces) ? payload.differenceSpaces : [];
-  const railOperations = Array.isArray(payload?.differenceRailOperations)
+  const railOperations = includeRailOperations && Array.isArray(payload?.differenceRailOperations)
     ? payload.differenceRailOperations.map((operation) => normalizeDifferenceRailOperation(operation)).filter(Boolean)
     : [];
   if (clearExisting) {
@@ -30006,6 +31728,7 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
     clearDifferenceRailOperations();
   }
   spaces.forEach((rawSpace) => {
+    const spaceRole = normalizeSpaceRole(rawSpace?.differenceSpaceRole || defaultRole);
     const railTrackNames = Array.isArray(rawSpace?.trackNames)
       ? rawSpace.trackNames.map((name) => String(name || '').trim()).filter((name) => name.length > 0)
       : [];
@@ -30027,12 +31750,13 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
         cutter?.material?.dispose?.();
       }
       if (!geometry) { return; }
-      const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null);
+      const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null, { role: spaceRole });
       mesh.position.set(0, 0, 0);
       mesh.quaternion.identity();
       mesh.scale.set(1, 1, 1);
       mesh.userData = {
         ...(mesh.userData || {}),
+        differenceSpaceRole: spaceRole,
         differenceRailTrackNames: railTrackNames.slice(),
         differenceRailBandHeight: Number(rawSpace?.bandHeight) || readDifferenceLineBandHeight(),
         differenceRailSidePadding: Number(rawSpace?.sidePadding) || 0.6,
@@ -30045,6 +31769,7 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
         differenceOpenFaces: normalizeDifferenceOpenFaces(rawSpace?.differenceOpenFaces || null),
       };
       applyDifferenceOpenFacesToMesh(mesh);
+      applyDifferenceSpaceMeshStyle(mesh, { visible: false });
       void applyDifferenceTextureToMesh(mesh, mesh.userData?.differenceTexture);
       mesh.updateMatrixWorld(true);
       rebuildDifferenceControlPointsFromGeometry(mesh);
@@ -30062,6 +31787,7 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
         readonly: true,
         userData: {
           ...runtimeState,
+          differenceSpaceRole: spaceRole,
           differenceTexture: cloneDifferenceTextureConfig(rawSpace?.differenceTexture || null),
           differenceProjectorType: String(rawSpace?.differenceProjectorType || runtimeState?.differenceProjectorType || '').trim() || 'tube',
           differenceTubeCurvePoints: Array.isArray(rawSpace?.differenceTubeCurvePoints) ? rawSpace.differenceTubeCurvePoints.slice() : null,
@@ -30078,8 +31804,8 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
     const scl = Array.isArray(rawSpace.scale) ? rawSpace.scale : [1, 1, 1];
     const useCanonicalBoxRestore = isCanonicalSerializedDifferenceBoxSpace(rawSpace);
     const mesh = useCanonicalBoxRestore
-      ? createDifferenceSpacePlane(new THREE.Vector3(Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0))
-      : createDifferenceSpaceMeshFromGeometry(geometry, null);
+      ? createDifferenceSpacePlane(new THREE.Vector3(Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0), { role: spaceRole })
+      : createDifferenceSpaceMeshFromGeometry(geometry, null, { role: spaceRole });
     if (!mesh) {
       geometry.dispose?.();
       return;
@@ -30092,6 +31818,7 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
     mesh.scale.set(Number(scl[0]) || 1, Number(scl[1]) || 1, Number(scl[2]) || 1);
     mesh.userData = {
       ...(mesh.userData || {}),
+      differenceSpaceRole: spaceRole,
       differenceTexture: cloneDifferenceTextureConfig(rawSpace?.differenceTexture || null),
       differenceProjectorType: String(rawSpace?.differenceProjectorType || '').trim() || 'box',
       differenceTubeCurvePoints: Array.isArray(rawSpace?.differenceTubeCurvePoints) ? rawSpace.differenceTubeCurvePoints.slice() : null,
@@ -30115,7 +31842,7 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
   mergeOverlappedBoundaryControlPoints(differenceBoundaryMergeDistance, { force: true });
   rebuildDifferenceEdgeOverlapConstraints();
   railOperations.forEach((operation) => {
-    differenceRailOperations.push(operation);
+    addDifferenceRailOperationIfMissing(operation);
   });
   syncDifferenceRailDisplayMeshes();
   syncDifferenceReadonlyTunnelSpaceVisibility();
@@ -30129,14 +31856,53 @@ function restoreDifferenceSpacesFromPayload(payload, { clearExisting = true, app
       pendingSavedDifferenceSpacesRetryCount = 0;
     }
   }
-  targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
+  targetObjects = differenceSpacePlanes.filter((m) => m?.parent && !isDifferenceRailDerivedMesh(m));
   setMeshListOpacity(targetObjects, 1);
+  differenceSpacePlanes.forEach((mesh) => {
+    if (!mesh?.parent || !isDifferenceRailDerivedMesh(mesh)) { return; }
+    applyDifferenceSpaceMeshStyle(mesh, { visible: false });
+    setDifferenceReadonlyControlPointsVisible(mesh, false);
+  });
   refreshDifferencePreview();
   refreshDifferenceSelectedEdgeHighlights();
   return {
     spaceCount: spaces.length,
     railOperationCount: railOperations.length,
   };
+}
+
+function restoreAreaSpacesFromPayload(payload, { clearExisting = false } = {}) {
+  const areaSpaces = Array.isArray(payload?.areaSpaces) ? payload.areaSpaces : [];
+  if (areaSpaces.length < 1) { return { spaceCount: 0, railOperationCount: 0 }; }
+  if (clearExisting) {
+    for (let i = differenceSpacePlanes.length - 1; i >= 0; i -= 1) {
+      const mesh = differenceSpacePlanes[i];
+      if (!isAreaSpaceMesh(mesh)) { continue; }
+      clearDifferenceReadonlyTunnelPreviewChunks(mesh);
+      mesh.children.forEach((child) => {
+        if (child?.userData?.differenceControlPoint) {
+          child.geometry?.dispose?.();
+          child.material?.dispose?.();
+        }
+      });
+      if (mesh.parent) {
+        mesh.parent.remove(mesh);
+      }
+      mesh.geometry?.dispose?.();
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((material) => material?.dispose?.());
+      } else {
+        mesh.material?.dispose?.();
+      }
+      differenceSpacePlanes.splice(i, 1);
+    }
+  }
+  const result = restoreDifferenceSpacesFromPayload(
+    { differenceSpaces: areaSpaces, differenceRailOperations: [] },
+    { clearExisting: false, applyToCity: false, includeRailOperations: false, defaultRole: SPACE_ROLE_AREA },
+  );
+  recomputeAreaManagedMeshVisibility();
+  return result;
 }
 
 function buildDifferenceTunnelEnvelopeFromTrackCurves(trackCurves, { sampleStepMeters = 2.0 } = {}) {
@@ -30611,7 +32377,9 @@ function createDifferenceSpaceMeshFromWorldGeometry(geometry, {
   geometry.computeVertexNormals?.();
   geometry.computeBoundingBox?.();
   geometry.computeBoundingSphere?.();
-  const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null);
+  const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null, {
+    role: normalizeSpaceRole(userData?.differenceSpaceRole || activeSpaceEditRole),
+  });
   if (!mesh) { return null; }
   mesh.position.set(0, 0, 0);
   mesh.quaternion.identity();
@@ -30626,7 +32394,8 @@ function createDifferenceSpaceMeshFromWorldGeometry(geometry, {
     void applyDifferenceTextureToMesh(mesh, mesh.userData.differenceTexture);
   }
   if (readonly) {
-    const readonlyTunnel = String(userData?.differenceGeneratedBy || '') === 'rail_tunnel_circle';
+    const generatedBy = String(userData?.differenceGeneratedBy || '').trim();
+    const readonlyTunnel = generatedBy === 'rail_tunnel_circle' || generatedBy === 'rail_tunnel_rect';
     mesh.userData = {
       ...(mesh.userData || {}),
       differenceReadonlyDisplay: true,
@@ -30683,7 +32452,7 @@ function addDifferenceTunnelTubeSpaceFromTrackCurves(trackCurves, {
       differenceTunnelYOffset: Number(cutter.userData?.differenceTunnelYOffset) || yOffset,
       differenceTunnelSideClearance: Number(cutter.userData?.differenceTunnelSideClearance) || sideClearance,
       differenceTunnelPreviewEdgePolylines: cloneDifferencePreviewPolylines(cutter.userData?.differenceTunnelPreviewEdgePolylines),
-      differenceTunnelPreviewChunkSpecs: cloneDifferenceTunnelPreviewChunkSpecs(cutter.userData?.differenceTunnelPreviewChunkSpecs),
+      differenceTunnelPreviewChunkSpecs: [],
     },
   });
 
@@ -30702,7 +32471,7 @@ function addDifferenceTunnelTubeSpaceFromTrackCurves(trackCurves, {
   if (differenceSpaceModeActive) {
     targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
     setMeshListOpacity(targetObjects, 1);
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
     refreshDifferenceSelectedEdgeHighlights();
   }
   syncDifferenceReadonlyTunnelSpaceVisibility();
@@ -30712,6 +32481,78 @@ function addDifferenceTunnelTubeSpaceFromTrackCurves(trackCurves, {
       ? mesh.userData.differenceTunnelTrackNames.slice()
       : [],
     radius: Number(mesh.userData?.differenceTunnelRadius) || 0,
+  };
+}
+
+function addDifferenceTunnelRectSpaceFromTrackCurves(trackCurves, {
+  innerWidth = 1.4,
+  innerHeight = 1.4,
+  sideClearance = 1.4,
+  sampleStepMeters = 1.2,
+} = {}) {
+  const widthValue = Math.max(0.2, Number(innerWidth) || 1.4);
+  const heightValue = Math.max(0.2, Number(innerHeight) || 1.4);
+  const sidePadding = (widthValue * 0.5) + Math.max(0, Number(sideClearance) || 0);
+  const cutter = buildDifferenceCutterMeshFromRailTracks({
+    trackCurves,
+    shapeType: 'solid',
+    detailMode: 'final',
+    sidePadding,
+    innerPadding: sidePadding,
+    minBandWidth: widthValue,
+    bandHeight: heightValue,
+    sampleStepMeters,
+  });
+  if (!cutter?.geometry) { return null; }
+
+  const geometry = cutter.geometry.clone();
+  geometry.applyMatrix4(cutter.matrixWorld);
+  const mesh = createDifferenceSpaceMeshFromWorldGeometry(geometry, {
+    readonly: true,
+    userData: {
+      differenceGeneratedBy: 'rail_tunnel_rect',
+      differenceProjectorType: 'box',
+      differenceTunnelTrackNames: Array.isArray(cutter.userData?.differenceRailTrackNames)
+        ? cutter.userData.differenceRailTrackNames.slice()
+        : [],
+      differenceTunnelRectWidth: Number(cutter.userData?.differenceRailMinBandWidth) || widthValue,
+      differenceTunnelRectHeight: Number(cutter.userData?.differenceRailBandHeight) || heightValue,
+      differenceTunnelSideClearance: Math.max(0, Number(sideClearance) || 0),
+      differenceRailBandHeight: Number(cutter.userData?.differenceRailBandHeight) || heightValue,
+      differenceRailSidePadding: Number(cutter.userData?.differenceRailSidePadding) || sidePadding,
+      differenceRailInnerPadding: Number(cutter.userData?.differenceRailInnerPadding) || sidePadding,
+      differenceRailMinBandWidth: Number(cutter.userData?.differenceRailMinBandWidth) || widthValue,
+      differenceRailSampleStepMeters: Number(cutter.userData?.differenceRailSampleStepMeters) || sampleStepMeters,
+      differenceRailDetailMode: String(cutter.userData?.differenceRailDetailMode || 'final'),
+    },
+  });
+
+  cutter.geometry.dispose?.();
+  if (Array.isArray(cutter.material)) {
+    cutter.material.forEach((mat) => mat?.dispose?.());
+  } else {
+    cutter.material?.dispose?.();
+  }
+  if (!mesh) { return null; }
+
+  relinkImportedDifferenceSharedPoints();
+  mergeOverlappedBoundaryControlPoints(differenceBoundaryMergeDistance, { force: true });
+  rebuildDifferenceEdgeOverlapConstraints();
+  updateDifferenceUnifyButtonState();
+  if (differenceSpaceModeActive) {
+    targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
+    setMeshListOpacity(targetObjects, 1);
+    refreshDifferencePreviewForTransformInteraction();
+    refreshDifferenceSelectedEdgeHighlights();
+  }
+  syncDifferenceReadonlyTunnelSpaceVisibility();
+  return {
+    mesh,
+    trackNames: Array.isArray(mesh.userData?.differenceTunnelTrackNames)
+      ? mesh.userData.differenceTunnelTrackNames.slice()
+      : [],
+    width: Number(mesh.userData?.differenceTunnelRectWidth) || 0,
+    height: Number(mesh.userData?.differenceTunnelRectHeight) || 0,
   };
 }
 
@@ -30743,7 +32584,7 @@ function persistDifferenceSpaceFromMesh(sourceMesh) {
   if (railTrackNames.length > 0) {
     const railOperation = buildDifferenceRailOperationFromCutter(sourceMesh);
     if (!railOperation) { return null; }
-    differenceRailOperations.push(railOperation);
+    addDifferenceRailOperationIfMissing(railOperation);
     syncDifferenceRailDisplayMeshes();
     structureSamplesDirty = true;
     return {
@@ -30755,7 +32596,9 @@ function persistDifferenceSpaceFromMesh(sourceMesh) {
   const baked = buildWorldBakedDifferenceCutterFromMesh(sourceMesh);
   if (!baked?.geometry) { return null; }
   const geometry = baked.geometry.clone();
-  const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null);
+  const mesh = createDifferenceSpaceMeshFromGeometry(geometry, null, {
+    role: sourceMesh?.userData?.differenceSpaceRole || activeSpaceEditRole,
+  });
   baked.geometry.dispose?.();
   baked.material?.dispose?.();
   if (!mesh) { return null; }
@@ -30765,6 +32608,7 @@ function persistDifferenceSpaceFromMesh(sourceMesh) {
   mesh.updateMatrixWorld(true);
   mesh.userData = {
     ...(mesh.userData || {}),
+    differenceSpaceRole: normalizeSpaceRole(sourceMesh?.userData?.differenceSpaceRole || activeSpaceEditRole),
     differenceTargets: cloneDifferenceTargets(sourceMesh?.userData?.differenceTargets || DEFAULT_DIFFERENCE_TARGETS),
   };
   structureSamplesDirty = true;
@@ -30922,7 +32766,7 @@ function buildDifferenceRailCutSectionWallMeshFromCutter(cutterMesh, { normalYTh
 function runDifferenceOnSinjyukuFromSelectedPoints() {
   const beforeSummary = buildDifferenceSpaceDiagnosticSummary(collectDifferenceSpaceDiagnosticDetails());
   console.info('[difference-excavation] before selected-points run', beforeSummary);
-  const activeSpaces = differenceSpacePlanes.filter((mesh) => mesh?.parent && mesh?.geometry);
+  const activeSpaces = getActiveDifferenceSpaces(SPACE_ROLE_DIFFERENCE);
   const spaceCutter = buildDifferenceCutterMeshFromMeshList(activeSpaces);
   const selectedPoints = getDifferenceSelectedPoints();
   const pathCutter = (selectedPoints.length >= 2)
@@ -31091,16 +32935,6 @@ function buildDifferenceCutterMeshFromRailTracks({
       resolvedRadius,
       tubularSegments,
     );
-    const previewChunkSpecs = buildDifferenceTunnelPreviewChunkSpecs(
-      shiftedCurve,
-      resolvedRadius,
-      tubularSegments,
-      resolvedTubeRadialSegments,
-      {
-        targetSegmentsPerChunk: 12,
-        maxChunkCount: 24,
-      },
-    );
     geometry.computeVertexNormals();
     geometry.computeBoundingBox?.();
     geometry.computeBoundingSphere?.();
@@ -31132,7 +32966,7 @@ function buildDifferenceCutterMeshFromRailTracks({
       differenceRailSampleStepMeters: stepMeters,
       differenceRailDetailMode: String(detailMode || 'standard'),
       differenceTunnelPreviewEdgePolylines: previewEdgePolylines,
-      differenceTunnelPreviewChunkSpecs: previewChunkSpecs,
+      differenceTunnelPreviewChunkSpecs: [],
     };
     return cutter;
   }
@@ -34322,12 +36156,15 @@ function handleDrag() {
         movedPoints.push(mesh);
       }
     });
-    if (movedPoints.length > 0) {
+    const simpleMoveMode = isDifferenceSimpleMoveModeActive();
+    if (!simpleMoveMode && movedPoints.length > 0) {
       propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
     }
-    for (let i = 0; i < 3; i += 1) {
-      const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-      if (moved < 1) { break; }
+    if (!simpleMoveMode) {
+      for (let i = 0; i < 3; i += 1) {
+        const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+        if (moved < 1) { break; }
+      }
     }
     dirtyMeshes.forEach((mesh) => {
       syncDifferenceGeometryFromControlPoints(mesh);
@@ -34335,7 +36172,7 @@ function handleDrag() {
     });
     pointRotateCenter.copy(moveDragAnchorStart.clone().add(delta));
     refreshDifferenceSelectedEdgeHighlights();
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
     updatePointRotateVisuals();
     return;
   }
@@ -34473,6 +36310,10 @@ async function handleMouseUp(mobile = false) {
     efficacy = true;
     return;
   }
+  if (differenceAreaBoxSelectionActive) {
+    finishDifferenceAreaBoxSelection();
+    return;
+  }
   if (editObject === 'STEEL_FRAME' && objectEditMode === 'CONSTRUCT' && constructionStrokePending) {
     if (!constructionStrokeActive) {
       const clickPoint = constructionStrokeStartPoint?.userData?.steelFramePoint
@@ -34527,9 +36368,11 @@ async function handleMouseUp(mobile = false) {
     const draggedPoints = Array.isArray(differenceControlPointDragPoint)
       ? differenceControlPointDragPoint.map((entry) => entry?.point).filter(Boolean)
       : [];
-    autoMergeNearbyDifferencePoints(draggedPoints);
-    mergeOverlappedBoundaryControlPoints();
-    refreshDifferencePreview();
+    if (!isDifferenceSimpleMoveModeActive()) {
+      autoMergeNearbyDifferencePoints(draggedPoints);
+      mergeOverlappedBoundaryControlPoints();
+    }
+    refreshDifferencePreviewForTransformInteraction();
     refreshDifferenceSelectedEdgeHighlights();
     commitDifferenceHistoryIfNeeded();
     differenceControlPointDragActive = false;
@@ -34544,9 +36387,11 @@ async function handleMouseUp(mobile = false) {
     const movedPoints = Array.isArray(differenceFaceVertexDragMesh)
       ? differenceFaceVertexDragMesh.flatMap((entry) => entry?.points?.map?.((p) => p.point) || [])
       : [];
-    autoMergeNearbyDifferencePoints(movedPoints);
-    mergeOverlappedBoundaryControlPoints();
-    refreshDifferencePreview();
+    if (!isDifferenceSimpleMoveModeActive()) {
+      autoMergeNearbyDifferencePoints(movedPoints);
+      mergeOverlappedBoundaryControlPoints();
+    }
+    refreshDifferencePreviewForTransformInteraction();
     refreshDifferenceSelectedEdgeHighlights();
     commitDifferenceHistoryIfNeeded();
     differenceFaceVertexDragActive = false;
@@ -34589,7 +36434,7 @@ async function handleMouseUp(mobile = false) {
     if (editObject === 'DIFFERENCE_SPACE' && differenceSpaceTransformMode === 'scale') {
       autoMergeNearbyDifferencePoints(draggedPoints);
       mergeOverlappedBoundaryControlPoints();
-      refreshDifferencePreview();
+      refreshDifferencePreviewForTransformInteraction();
       refreshDifferenceSelectedEdgeHighlights();
       commitDifferenceHistoryIfNeeded();
     } else {
@@ -34637,9 +36482,11 @@ async function handleMouseUp(mobile = false) {
       .map((entry) => entry?.mesh)
       .filter((mesh) => mesh?.userData?.differenceControlPoint);
     dragging = false;
-    autoMergeNearbyDifferencePoints(draggedPoints);
-    mergeOverlappedBoundaryControlPoints();
-    refreshDifferencePreview();
+    if (!isDifferenceSimpleMoveModeActive()) {
+      autoMergeNearbyDifferencePoints(draggedPoints);
+      mergeOverlappedBoundaryControlPoints();
+    }
+    refreshDifferencePreviewForTransformInteraction();
     refreshDifferenceSelectedEdgeHighlights();
     commitDifferenceHistoryIfNeeded();
     moveClickPending = false;
@@ -35138,7 +36985,7 @@ async function handleMouseDown() {
           ? bodyHit.object
           : (cpHit?.object?.userData?.parentDifferenceSpacePlane || cpHit?.object?.parent || null);
         if (mesh?.userData?.differenceSpacePlane) {
-          toggleDifferenceBodySelection(mesh);
+          toggleDifferenceBodySelection(mesh, { additive: differenceBodySelectionMode === 'box' });
           clearDifferenceFaceHighlight();
           selectDifferencePlane(mesh);
           updateDifferenceSelectionStatus();
@@ -35199,8 +37046,7 @@ async function handleMouseDown() {
     const hits = getIntersectObjects();
     if (differenceBodySelectModeActive
       && editObject === 'DIFFERENCE_SPACE'
-      && ['move', 'rotation'].includes(differenceSpaceTransformMode)
-      && !isDifferenceAxisMoveModeEnabled()) {
+      && ['move', 'rotation'].includes(differenceSpaceTransformMode)) {
       const bodyHit = hits.find((h) => h?.object?.userData?.differenceSpacePlane) || null;
       const cpHit = hits.find((h) => h?.object?.userData?.differenceControlPoint) || null;
       const mesh = bodyHit?.object?.userData?.differenceSpacePlane
@@ -35227,7 +37073,7 @@ async function handleMouseDown() {
         }
         const selectionKey = buildDifferenceTransformSelectionKey({ mesh });
         const sameSelection = pointRotateTarget === mesh && isSameDifferenceTransformSelection(selectionKey);
-        toggleDifferenceBodySelection(mesh);
+        toggleDifferenceBodySelection(mesh, { additive: differenceBodySelectionMode === 'box' });
         clearDifferenceFaceHighlight();
         selectDifferencePlane(mesh);
         pointRotateTarget = mesh;
@@ -35821,7 +37667,7 @@ async function handleMouseDown() {
       selectDifferencePlane(plane);
       targetObjects = differenceSpacePlanes.filter((m) => m?.parent);
       setMeshListOpacity(targetObjects, 1);
-      refreshDifferencePreview();
+      refreshDifferencePreviewForTransformInteraction();
       refreshDifferenceSelectedEdgeHighlights();
       commitDifferenceHistoryIfNeeded();
 
@@ -35895,10 +37741,19 @@ async function handleMouseDown() {
       if (pickedIsHandle) {
         // レールモードのグループドラッグは無効化する。
         railGroupDragState = null;
+        updateRailCoordinatePanelUI({ clearInputs: true });
         updateRailSelectionStatus();
         return;
       } else {
         railGroupDragState = null;
+      }
+      if (isRailPointPickMesh(choice_object)) {
+        selectedRailPoint = {
+          trackName: String(choice_object.userData.trackName || '').trim(),
+          pointIndex: Number(choice_object.userData.pointIndex),
+        };
+        drawRailSelectionLine(selectedRailPoint.trackName, selectedRailPoint.pointIndex);
+        updateRailCoordinatePanelUI({ clearInputs: true });
       }
       const pos = camera.position;
       if (!move_direction_y) {
@@ -37188,7 +39043,9 @@ function beginDifferenceFaceVertexDrag(hit, selectedFaces = null, options = {}) 
   const worldNormal = getWorldFaceNormalFromHit(hit);
   if (!mesh?.userData?.differenceSpacePlane || !localNormal || !worldNormal) { return false; }
   beginDifferenceHistorySession();
-  rebuildDifferenceEdgeOverlapConstraints();
+  if (!isDifferenceSimpleMoveModeActive()) {
+    rebuildDifferenceEdgeOverlapConstraints();
+  }
   const dragMode = options?.dragMode === 'plane' ? 'plane' : 'axis';
   const planeNormalWorld = options?.planeNormalWorld?.clone?.().normalize?.() || null;
   const axisOverride = options?.axisWorldOverride?.clone?.().normalize?.() || null;
@@ -37280,7 +39137,9 @@ function beginDifferenceControlPointDrag(point, selectedPoints = null, options =
   const mesh = point?.userData?.parentDifferenceSpacePlane || point?.parent || null;
   if (!point?.userData?.differenceControlPoint || !mesh?.userData?.differenceSpacePlane) { return false; }
   beginDifferenceHistorySession();
-  rebuildDifferenceEdgeOverlapConstraints();
+  if (!isDifferenceSimpleMoveModeActive()) {
+    rebuildDifferenceEdgeOverlapConstraints();
+  }
   const dragMode = options?.dragMode === 'plane' ? 'plane' : 'axis';
   const planeNormalWorld = options?.planeNormalWorld?.clone?.().normalize?.() || null;
   const axisOverride = options?.axisWorldOverride?.clone?.().normalize?.() || null;
@@ -37334,6 +39193,7 @@ function beginDifferenceControlPointDrag(point, selectedPoints = null, options =
 function updateDifferenceControlPointDrag() {
   if (!differenceControlPointDragActive || !Array.isArray(differenceControlPointDragPoint) || differenceControlPointDragPoint.length < 1) { return; }
   const mesh = differenceControlPointDragMesh;
+  const simpleMoveMode = isDifferenceSimpleMoveModeActive();
   const axisWorld = differenceControlPointDragAxisWorld.clone().normalize();
   let deltaWorldClamped = 0;
   let deltaVectorWorld = null;
@@ -37365,23 +39225,26 @@ function updateDifferenceControlPointDrag() {
     }
     dirtyMeshes.add(m);
   });
-  propagateDifferenceSharedPoints(
-    differenceControlPointDragPoint.map((entry) => entry.point),
-    dirtyMeshes,
-  );
-  for (let i = 0; i < 3; i += 1) {
-    const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-    if (moved < 1) { break; }
+  if (!simpleMoveMode) {
+    propagateDifferenceSharedPoints(
+      differenceControlPointDragPoint.map((entry) => entry.point),
+      dirtyMeshes,
+    );
+    for (let i = 0; i < 3; i += 1) {
+      const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+      if (moved < 1) { break; }
+    }
   }
   dirtyMeshes.forEach((m) => syncDifferenceGeometryFromControlPoints(m));
   refreshDifferenceSelectedEdgeHighlights();
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
 }
 
 function updateDifferenceFaceVertexDrag() {
   if (!differenceFaceVertexDragActive || !Array.isArray(differenceFaceVertexDragMesh) || differenceFaceVertexDragMesh.length < 1) { return; }
   const primary = differenceFaceVertexDragMesh[0];
   const mesh = primary.mesh;
+  const simpleMoveMode = isDifferenceSimpleMoveModeActive();
   const localNormal = primary.localNormal;
   const axisDir = primary.axisDir.clone();
   let deltaClamped = 0;
@@ -37425,10 +39288,12 @@ function updateDifferenceFaceVertexDrag() {
     }
     dirtyMeshes.add(entry.mesh);
   });
-  propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
-  for (let i = 0; i < 3; i += 1) {
-    const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-    if (moved < 1) { break; }
+  if (!simpleMoveMode) {
+    propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
+    for (let i = 0; i < 3; i += 1) {
+      const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+      if (moved < 1) { break; }
+    }
   }
   dirtyMeshes.forEach((m) => {
     syncDifferenceGeometryFromControlPoints(m);
@@ -37436,7 +39301,7 @@ function updateDifferenceFaceVertexDrag() {
   });
   refreshDifferenceSelectedFaceHighlights();
   refreshDifferenceSelectedEdgeHighlights();
-  refreshDifferencePreview();
+  refreshDifferencePreviewForTransformInteraction();
   showDifferenceFaceHighlight({
     object: mesh,
     face: { normal: localNormal.clone() },
@@ -37467,7 +39332,9 @@ function beginPointRotateDrag(axisMesh, { gizmoOnly = false, forceAxis = null } 
         parent: point.parent,
         startWorldPos: point.getWorldPosition(new THREE.Vector3()),
       }));
-      rebuildDifferenceEdgeOverlapConstraints();
+      if (shouldRunDifferenceHeavyAuxProcessing()) {
+        rebuildDifferenceEdgeOverlapConstraints();
+      }
     }
   }
   pointRotateAxisLocal = forceAxis?.clone?.().normalize?.()
@@ -37558,7 +39425,9 @@ function beginPointRotateMoveDrag() {
   }
   if (pointRotateTarget?.userData?.differenceSpacePlane) {
     beginDifferenceHistorySession();
-    rebuildDifferenceEdgeOverlapConstraints();
+    if (shouldRunDifferenceHeavyAuxProcessing()) {
+      rebuildDifferenceEdgeOverlapConstraints();
+    }
     if (differenceSpaceTransformMode === 'rotation') {
       const selectedPoints = Array.from(differenceSelectedControlPoints || [])
         .filter((point) => point?.userData?.differenceControlPoint && point?.parent);
@@ -37686,6 +39555,7 @@ function updatePointRotateDrag() {
       && differenceSpaceTransformMode === 'rotation'
       && Array.isArray(pointRotateSelectionDragEntries)
       && pointRotateSelectionDragEntries.length > 0) {
+      const heavyAux = shouldRunDifferenceHeavyAuxProcessing();
       const rotationQuat = new THREE.Quaternion().setFromAxisAngle(pointRotateAxis, angle);
       const dirtyMeshes = new Set();
       const movedPoints = [];
@@ -37701,18 +39571,20 @@ function updatePointRotateDrag() {
           movedPoints.push(entry.point);
         }
       });
-      if (movedPoints.length > 0) {
+      if (heavyAux && movedPoints.length > 0) {
         propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
       }
-      for (let i = 0; i < 3; i += 1) {
-        const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-        if (moved < 1) { break; }
+      if (heavyAux) {
+        for (let i = 0; i < 3; i += 1) {
+          const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+          if (moved < 1) { break; }
+        }
       }
       dirtyMeshes.forEach((mesh) => syncDifferenceGeometryFromControlPoints(mesh));
       refreshDifferenceSelectedEdgeHighlights();
-      refreshDifferencePreview();
+      refreshDifferencePreviewForTransformInteraction();
     } else if (!pointRotateGizmoOnly && pointRotateTarget?.userData?.differenceSpacePlane) {
-      refreshDifferencePreview();
+      refreshDifferencePreviewForTransformInteraction();
     }
   }
   updatePointRotateVisuals();
@@ -37730,6 +39602,7 @@ function updatePointRotateMoveDrag() {
     && differenceSpaceTransformMode === 'rotation'
     && Array.isArray(pointRotateSelectionMoveEntries)
     && pointRotateSelectionMoveEntries.length > 0) {
+    const heavyAux = shouldRunDifferenceHeavyAuxProcessing();
     const dirtyMeshes = new Set();
     const movedPoints = [];
     pointRotateSelectionMoveEntries.forEach((entry) => {
@@ -37743,16 +39616,18 @@ function updatePointRotateMoveDrag() {
         movedPoints.push(entry.point);
       }
     });
-    if (movedPoints.length > 0) {
+    if (heavyAux && movedPoints.length > 0) {
       propagateDifferenceSharedPoints(movedPoints, dirtyMeshes);
     }
-    for (let i = 0; i < 3; i += 1) {
-      const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-      if (moved < 1) { break; }
+    if (heavyAux) {
+      for (let i = 0; i < 3; i += 1) {
+        const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+        if (moved < 1) { break; }
+      }
     }
     dirtyMeshes.forEach((mesh) => syncDifferenceGeometryFromControlPoints(mesh));
     refreshDifferenceSelectedEdgeHighlights();
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
     updatePointRotateVisuals();
     return;
   }
@@ -37791,14 +39666,17 @@ function updatePointRotateMoveDrag() {
     drawingObject([pointRotateTarget]);
   }
   if (pointRotateTarget?.userData?.differenceSpacePlane) {
+    const heavyAux = shouldRunDifferenceHeavyAuxProcessing();
     const dirtyMeshes = new Set();
-    for (let i = 0; i < 3; i += 1) {
-      const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
-      if (moved < 1) { break; }
+    if (heavyAux) {
+      for (let i = 0; i < 3; i += 1) {
+        const moved = applyDifferenceEdgeOverlapConstraints(dirtyMeshes);
+        if (moved < 1) { break; }
+      }
     }
     dirtyMeshes.forEach((m) => syncDifferenceGeometryFromControlPoints(m));
     refreshDifferenceSelectedEdgeHighlights();
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
   }
   updatePointRotateVisuals();
 }
@@ -38706,7 +40584,7 @@ function updateScaleDrag() {
     const finalDirty = constrained || dirtyMeshes;
     finalDirty.forEach((mesh) => syncDifferenceGeometryFromControlPoints(mesh));
     refreshDifferenceSelectedEdgeHighlights();
-    refreshDifferencePreview();
+    refreshDifferencePreviewForTransformInteraction();
   }
 
   if (rotationInputX) { rotationInputX.value = String(Number(factor).toFixed(3)); }
@@ -39139,6 +41017,7 @@ export function UIevent (uiID, toggle){
     UIevent('edit', 'inactive');
 
     OperationMode = 0
+    viewModeActive = true
     search_object = false
     choice_object = false
     dragging = false
@@ -39156,6 +41035,8 @@ export function UIevent (uiID, toggle){
       railVisualRoot.visible = true;
       setRailVisualRenderVisible(true);
     }
+    syncDifferenceReadonlyTunnelSpaceVisibility();
+    setAllDifferenceControlPointsVisible(false);
     // see は creat > view と同様に「構造物は通常表示・点は非表示」に揃える
     steelFrameMode.setActive(true);
     const copiedObjects = getConstructionCopyTargets()
@@ -39167,6 +41048,8 @@ export function UIevent (uiID, toggle){
 
   } else {
     console.log( 'see _inactive' )
+    viewModeActive = false
+    setAllDifferenceControlPointsVisible(true);
   }} else if ( uiID === 'edit' ){ if ( toggle === 'active' ){
     console.log( 'edit _active' )
     OperationMode = 1
@@ -39200,7 +41083,7 @@ export function UIevent (uiID, toggle){
   } else {
     console.log( 'rail _inactive' )
     setRailGuideYModeActive(false);
-    removeMeshes(targetObjects);
+    clearRailSelectionTargetsOnly();
     clearRailSelectionLine();
     selectedRailPoint = null;
     search_object = false
@@ -39217,6 +41100,7 @@ export function UIevent (uiID, toggle){
     hideRailInsertHoverPin();
     cancelRailStraightDraft();
     syncRailCreateGuideGrid();
+    setRotationPanelVisible(false);
     updateRailSelectionStatus();
 
   }} else if ( uiID === 'new' ){ if ( toggle === 'active' ){
@@ -39258,6 +41142,7 @@ export function UIevent (uiID, toggle){
       setMeshListOpacity(targetObjects, 1);
       railGroupDragState = null;
       railRotateDragState = null;
+      updateRailCoordinatePanelUI({ clearInputs: true });
       updateRailSelectionStatus();
     }
 
@@ -39274,6 +41159,7 @@ export function UIevent (uiID, toggle){
       selectedRailPoint = null;
       railGroupDragState = null;
       railRotateDragState = null;
+      setRotationPanelVisible(false);
       updateRailSelectionStatus();
     }
 
@@ -40106,7 +41992,6 @@ export function UIevent (uiID, toggle){
     move_direction_y = false
     if (useDifferenceMove) {
       movePointPanelActive = false
-      setDifferenceBodySelectionMode(false);
       differenceMoveMode = 'plane'
       differenceAxisMoveDragMode = 'plane'
       pointRotateModeActive = true
@@ -40193,7 +42078,6 @@ export function UIevent (uiID, toggle){
     move_direction_y = true
     if (useDifferenceMove) {
       movePointPanelActive = false
-      setDifferenceBodySelectionMode(false);
       differenceMoveMode = 'height'
       differenceAxisMoveDragMode = 'height'
       pointRotateModeActive = true
@@ -40372,10 +42256,10 @@ export function UIevent (uiID, toggle){
   }} else if ( uiID === 'Difference' ){ if ( toggle === 'active' ){
   console.log( 'Difference _active' )
     if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(SPACE_ROLE_DIFFERENCE);
     differenceSpaceTransformMode = 'none'
     ensureDifferenceRailDisplayMeshes();
     setDifferenceRailDisplayMeshesVisible(true);
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     if (differencePanel) {
       differencePanel.style.display = 'none';
@@ -40388,7 +42272,6 @@ export function UIevent (uiID, toggle){
     differenceSpaceModeActive = false
     differenceSpaceTransformMode = 'none'
     setDifferenceTargetSelectionMode('none');
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     scalePointPanelActive = false
@@ -40422,19 +42305,50 @@ export function UIevent (uiID, toggle){
   } else {
   console.log( 'body_select _inactive' )
     setDifferenceBodySelectionMode(false);
+  }} else if ( uiID === 'area' ){ if ( toggle === 'active' ){
+  console.log( 'area _active' )
+    if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(SPACE_ROLE_AREA);
+    differenceSpaceTransformMode = 'none'
+    setDifferenceRailDisplayMeshesVisible(false);
+    setDifferenceBodySelectionMode(false);
+    if (differencePanel) {
+      differencePanel.style.display = 'none';
+    }
+    applyStructurePreviewLikeVisibility();
+    updateStructurePinnedVisibility();
+    updateDifferenceStatus('area space を定義して、あとで構造物の自動分類に使います。');
+  } else {
+  console.log( 'area _inactive' )
+    differenceSpaceModeActive = false
+    differenceSpaceTransformMode = 'none'
+    pointRotateModeActive = false
+    scalePointPanelActive = false
+    scaleDragging = false
+    scaleRotateDragging = false
+    scaleDragStartPositions = []
+    scaleDragSingleDecorationMode = false
+    if (scaleGizmoGroup) { scaleGizmoGroup.visible = false; }
+    if (scaleArrow) { scaleArrow.visible = false; }
+    if (scaleArrowPick) { scaleArrowPick.visible = false; }
+    clearPointRotateState()
+    if (differencePanel) {
+      differencePanel.style.display = 'none';
+    }
+    if (editObject === 'DIFFERENCE_SPACE') {
+      editObject = 'Standby';
+      objectEditMode = 'Standby';
+    }
+    clearDifferencePreviewTube();
+    clearDifferenceFaceHighlight();
+    differenceSpacePlanes.forEach((mesh) => resetDifferenceControlPointsHighlight(mesh));
+    clearDifferenceSelectedBodyHighlights();
+    updateStructurePinnedVisibility();
   }} else if ( uiID === 'space' ){ if ( toggle === 'active' ){
   console.log( 'space _active' )
     if (blockManualDioramaSpaceMode()) { return; }
-    if (countMissingStandaloneDifferenceSpaces(lastLoadedStandaloneDifferencePayload) > 0
-      && lastLoadedStandaloneDifferencePayload
-      && Array.isArray(lastLoadedStandaloneDifferencePayload?.differenceSpaces)
-      && lastLoadedStandaloneDifferencePayload.differenceSpaces.length > 0) {
-      try {
-        restoreDifferenceSpacesFromPayload(lastLoadedStandaloneDifferencePayload, { clearExisting: false, applyToCity: false });
-      } catch (err) {
-        console.warn('[difference][space] failed to restore last loaded standalone spaces on activation', err);
-      }
-    }
+    setActiveSpaceEditRole(SPACE_ROLE_DIFFERENCE);
+    ensureLoadedDifferenceSpacesReady('[difference][space]', SPACE_ROLE_DIFFERENCE);
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'none'
     differenceShapeType = 'box'
@@ -40446,7 +42360,7 @@ export function UIevent (uiID, toggle){
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'Standby'
     search_object = false
-    syncDifferenceSpaceVisualStateForDisplay('[difference][space]');
+    syncDifferenceSpaceVisualStateForDisplay('[difference][space]', SPACE_ROLE_DIFFERENCE);
     applyStructurePreviewLikeVisibility();
     if (differencePanel) {
       differencePanel.style.display = 'none';
@@ -40457,7 +42371,6 @@ export function UIevent (uiID, toggle){
     differenceSpaceModeActive = false
     differenceSpaceTransformMode = 'none'
     setDifferenceTargetSelectionMode('none');
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     scalePointPanelActive = false
@@ -40481,27 +42394,77 @@ export function UIevent (uiID, toggle){
     updateDifferenceStatus('spaceで平面を1枚以上配置してください。');
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
-  }} else if ( uiID === 'add/2' || uiID === 'add_space' ){ if ( toggle === 'active' ){
+  }} else if ( uiID === 'area_space' ){ if ( toggle === 'active' ){
+  console.log( 'area_space _active' )
+    if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(SPACE_ROLE_AREA);
+    ensureLoadedDifferenceSpacesReady('[area][space]', SPACE_ROLE_AREA);
+    differenceSpaceModeActive = true
+    differenceSpaceTransformMode = 'none'
+    differenceShapeType = 'box'
+    setDifferenceRailDisplayMeshesVisible(false);
+    if (differenceShapeSelect) {
+      differenceShapeSelect.value = 'box';
+    }
+    editObject = 'DIFFERENCE_SPACE'
+    objectEditMode = 'Standby'
+    search_object = false
+    syncDifferenceSpaceVisualStateForDisplay('[area][space]', SPACE_ROLE_AREA);
+    applyStructurePreviewLikeVisibility();
+    if (differencePanel) {
+      differencePanel.style.display = 'none';
+    }
+    updateDifferenceStatus('area space を選択・編集できます。');
+    updateDifferenceModePanels();
+  } else {
+  console.log( 'area_space _inactive' )
+    differenceSpaceModeActive = false
+    differenceSpaceTransformMode = 'none'
+    pointRotateModeActive = false
+    scalePointPanelActive = false
+    scaleDragging = false
+    scaleRotateDragging = false
+    scaleDragStartPositions = []
+    scaleDragSingleDecorationMode = false
+    if (scaleGizmoGroup) { scaleGizmoGroup.visible = false; }
+    if (scaleArrow) { scaleArrow.visible = false; }
+    if (scaleArrowPick) { scaleArrowPick.visible = false; }
+    clearPointRotateState()
+    if (editObject === 'DIFFERENCE_SPACE' && objectEditMode === 'CONSTRUCT') {
+      objectEditMode = 'Standby';
+    }
+    if (editObject === 'DIFFERENCE_SPACE') {
+      editObject = 'Standby';
+    }
+    clearDifferencePreviewTube();
+    clearDifferenceFaceHighlight();
+    differenceSpacePlanes.forEach((mesh) => resetDifferenceControlPointsHighlight(mesh));
+    updateDifferenceStatus('area space を1つ以上配置してください。');
+    updateDifferenceModePanels();
+    refreshDifferenceSelectedEdgeHighlights();
+  }} else if ( uiID === 'add/2' || uiID === 'add_space' || uiID === 'area_add' ){ if ( toggle === 'active' ){
   console.log( uiID + ' _active' )
     if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(uiID === 'area_add' ? SPACE_ROLE_AREA : SPACE_ROLE_DIFFERENCE);
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'add'
     differenceAddGuideBaseY = Number(AddPointGuideGrid?.position?.y) || Number(addPointGridY) || 0
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     clearPointRotateState()
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'CREATE_NEW'
     search_object = false
-    targetObjects = differenceSpacePlanes.filter((m) => m?.parent)
+    targetObjects = getActiveDifferenceSpaces(activeSpaceEditRole)
     setMeshListOpacity(targetObjects, 1)
     differenceShapeType = 'box'
     if (differenceShapeSelect) {
       differenceShapeSelect.value = 'box';
     }
     clearDifferencePreviewTube();
-    updateDifferenceStatus('空き領域クリックでボックス追加。既存面クリックで押し出し拡張します。');
+    updateDifferenceStatus(activeSpaceEditRole === SPACE_ROLE_AREA
+      ? 'area add: クリックで空間追加、既存面クリックで押し出し拡張します。'
+      : '空き領域クリックでボックス追加。既存面クリックで押し出し拡張します。');
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
   } else {
@@ -40515,15 +42478,19 @@ export function UIevent (uiID, toggle){
     differenceSpacePlanes.forEach((mesh) => resetDifferenceControlPointsHighlight(mesh));
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
-  }} else if ( uiID === 'move/2' || uiID === 'move_space' ){ if ( toggle === 'active' ){
+  }} else if ( uiID === 'move/2' || uiID === 'move_space' || uiID === 'area_move' ){ if ( toggle === 'active' ){
   console.log( uiID + ' _active' )
     if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(uiID === 'area_move' ? SPACE_ROLE_AREA : SPACE_ROLE_DIFFERENCE);
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'move'
     differenceMoveMode = 'face'
     differenceAxisMoveDragMode = 'none'
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'block'; }
-    setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    if (activeSpaceEditRole === SPACE_ROLE_DIFFERENCE) {
+      setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    } else {
+      setDifferenceBodySelectionMode(false);
+    }
     differenceShapeType = 'box'
     if (differenceShapeSelect) {
       differenceShapeSelect.value = 'box';
@@ -40540,15 +42507,17 @@ export function UIevent (uiID, toggle){
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'CONSTRUCT'
     search_object = false
-    targetObjects = differenceSpacePlanes.filter((m) => m?.parent)
+    targetObjects = getActiveDifferenceSpaces(activeSpaceEditRole)
     setMeshListOpacity(targetObjects, 1)
-    differenceSpacePlanes.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
+    targetObjects.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
     movePointPanelActive = false;
     setRotationPanelMode('rotation');
     applyDifferencePointRotateAngleState('move', { attachToTarget: Boolean(pointRotateTarget) });
     setRotationPanelVisible(true);
     updatePointRotateVisuals();
-    updateDifferenceStatus('move: 面を選択してドラッグで形状を変更します。');
+    updateDifferenceStatus(activeSpaceEditRole === SPACE_ROLE_AREA
+      ? 'area move: 面を選択してドラッグで形状を変更します。'
+      : 'move: 面を選択してドラッグで形状を変更します。');
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
   } else {
@@ -40558,7 +42527,6 @@ export function UIevent (uiID, toggle){
     }
     differenceMoveMode = 'face'
     differenceAxisMoveDragMode = 'none'
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     setRotationPanelVisible(false);
@@ -40570,13 +42538,17 @@ export function UIevent (uiID, toggle){
     differenceSpacePlanes.forEach((mesh) => resetDifferenceControlPointsHighlight(mesh));
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
-  }} else if ( uiID === 'rotation/3' || uiID === 'rotation_space' ){ if ( toggle === 'active' ){
+  }} else if ( uiID === 'rotation/3' || uiID === 'rotation_space' || uiID === 'area_rotation' ){ if ( toggle === 'active' ){
   console.log( uiID + ' _active' )
     if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(uiID === 'area_rotation' ? SPACE_ROLE_AREA : SPACE_ROLE_DIFFERENCE);
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'rotation'
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'block'; }
-    setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    if (activeSpaceEditRole === SPACE_ROLE_DIFFERENCE) {
+      setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    } else {
+      setDifferenceBodySelectionMode(false);
+    }
     differenceShapeType = 'box'
     if (differenceShapeSelect) {
       differenceShapeSelect.value = 'box';
@@ -40593,15 +42565,17 @@ export function UIevent (uiID, toggle){
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'CONSTRUCT'
     search_object = false
-    targetObjects = differenceSpacePlanes.filter((m) => m?.parent)
+    targetObjects = getActiveDifferenceSpaces(activeSpaceEditRole)
     setMeshListOpacity(targetObjects, 1)
-    differenceSpacePlanes.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
+    targetObjects.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
     movePointPanelActive = false;
     setRotationPanelMode('rotation');
     applyDifferencePointRotateAngleState('rotation', { attachToTarget: Boolean(pointRotateTarget) });
     setRotationPanelVisible(true);
     updatePointRotateVisuals();
-    updateDifferenceStatus('rotation: 面/点を選択し、ギズモで回転します。');
+    updateDifferenceStatus(activeSpaceEditRole === SPACE_ROLE_AREA
+      ? 'area rotation: 面/点を選択し、ギズモで回転します。'
+      : 'rotation: 面/点を選択し、ギズモで回転します。');
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
   } else {
@@ -40609,7 +42583,6 @@ export function UIevent (uiID, toggle){
     if (differenceSpaceTransformMode === 'rotation') {
       differenceSpaceTransformMode = 'none'
     }
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     setRotationPanelVisible(false);
@@ -40621,13 +42594,17 @@ export function UIevent (uiID, toggle){
     differenceSpacePlanes.forEach((mesh) => resetDifferenceControlPointsHighlight(mesh));
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
-  }} else if ( uiID === 'scale/2' || uiID === 'scale_space' ){ if ( toggle === 'active' ){
+  }} else if ( uiID === 'scale/2' || uiID === 'scale_space' || uiID === 'area_scale' ){ if ( toggle === 'active' ){
   console.log( uiID + ' _active' )
     if (blockManualDioramaSpaceMode()) { return; }
+    setActiveSpaceEditRole(uiID === 'area_scale' ? SPACE_ROLE_AREA : SPACE_ROLE_DIFFERENCE);
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'scale'
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'block'; }
-    setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    if (activeSpaceEditRole === SPACE_ROLE_DIFFERENCE) {
+      setDifferenceBodySelectButtonState(differenceBodySelectModeActive);
+    } else {
+      setDifferenceBodySelectionMode(false);
+    }
     differenceShapeType = 'box'
     if (differenceShapeSelect) {
       differenceShapeSelect.value = 'box';
@@ -40639,15 +42616,17 @@ export function UIevent (uiID, toggle){
     editObject = 'DIFFERENCE_SPACE'
     objectEditMode = 'CONSTRUCT'
     search_object = false
-    targetObjects = differenceSpacePlanes.filter((m) => m?.parent)
+    targetObjects = getActiveDifferenceSpaces(activeSpaceEditRole)
     setMeshListOpacity(targetObjects, 1)
-    differenceSpacePlanes.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
+    targetObjects.forEach((mesh) => setDifferencePlaneVisual(mesh, false));
     setRotationPanelMode('scale_point');
     applyDifferenceScaleAngleState();
     setRotationPanelVisible(true);
     updateScalePointPanelUI({ clearInputs: true });
     updateScaleGizmo();
-    updateDifferenceStatus('scale: control pointを複数選択してギズモでスケールします。');
+    updateDifferenceStatus(activeSpaceEditRole === SPACE_ROLE_AREA
+      ? 'area scale: control pointを複数選択してギズモでスケールします。'
+      : 'scale: control pointを複数選択してギズモでスケールします。');
     updateDifferenceModePanels();
     refreshDifferenceSelectedEdgeHighlights();
   } else {
@@ -40655,7 +42634,6 @@ export function UIevent (uiID, toggle){
     if (differenceSpaceTransformMode === 'scale') {
       differenceSpaceTransformMode = 'none'
     }
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     scalePointPanelActive = false
     scaleDragging = false
@@ -40676,7 +42654,6 @@ export function UIevent (uiID, toggle){
     if (blockManualDioramaSpaceMode()) { return; }
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'tube'
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     clearPointRotateState()
@@ -40733,7 +42710,6 @@ export function UIevent (uiID, toggle){
     differenceSpaceModeActive = true
     differenceSpaceTransformMode = 'texture'
     differenceLinePickModeActive = false
-    if (differenceBodySelectButton) { differenceBodySelectButton.style.display = 'none'; }
     setDifferenceBodySelectionMode(false);
     pointRotateModeActive = false
     clearPointRotateState()
@@ -40973,8 +42949,8 @@ function isInteractionAllowed(clientX, clientY){
   return pointInCanvas(clientX, clientY);
 }
 
-const PANEL_INPUT_ROOT_SELECTOR = '#rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #group-mode-panel, #construction-category-panel, #rail-construction-panel, #group-point-edit-mode-panel, #train-panel, #scene-panel, #performance-panel';
-const OVERLAY_UI_TARGET_SELECTOR = '#save-buttons, #show-instructions-btn, #demo-play-btn, #instructions-panel, #rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #construction-category-panel, #rail-construction-panel, #group-mode-panel, #group-point-edit-mode-panel, #train-panel, #performance-panel, #performance-toggle-btn, #scene-panel, #scene-toggle-btn, #create-mode-utility-buttons, #create-guide-y-button, #UiGroup, #frontViewButtons, #guide-window, #difference-body-select, #difference-move-xz, #difference-move-y, #difference-auto-merge-toggle, #logwindow';
+const PANEL_INPUT_ROOT_SELECTOR = '#rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #group-mode-panel, #construction-category-panel, #rail-construction-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #scene-panel, #performance-panel';
+const OVERLAY_UI_TARGET_SELECTOR = '#save-buttons, #show-instructions-btn, #demo-play-btn, #instructions-panel, #rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #construction-category-panel, #rail-construction-panel, #group-mode-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #performance-panel, #performance-toggle-btn, #scene-panel, #scene-toggle-btn, #create-mode-utility-buttons, #create-guide-y-button, #UiGroup, #frontViewButtons, #guide-window, #difference-auto-merge-toggle, #difference-copy-button, #logwindow';
 const PANEL_INPUT_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [contenteditable]:not([contenteditable="false"])';
 
 function isPanelValueInputTarget(target) {
@@ -41087,6 +43063,10 @@ document.addEventListener('mousemove', (e) => {
   if (!isInteractionAllowed(e.clientX, e.clientY)) return;
   // UI監視 編集モード
   handleMouseMove(e.clientX, e.clientY);
+  if (differenceAreaBoxSelectionActive) {
+    updateDifferenceAreaBoxSelection(e.clientX, e.clientY);
+    return;
+  }
   updateConstructionStrokeSelection(e.clientX, e.clientY);
   if (structurePinDragActive) {
     updateDraggedStructurePinFromPointer();
@@ -41231,6 +43211,10 @@ document.addEventListener('touchmove', (e) => {
 
   // UI監視
   handleMouseMove(touch.clientX, touch.clientY);
+  if (differenceAreaBoxSelectionActive) {
+    updateDifferenceAreaBoxSelection(touch.clientX, touch.clientY);
+    return;
+  }
   updateConstructionStrokeSelection(touch.clientX, touch.clientY);
   if (structurePinDragActive) {
     updateDraggedStructurePinFromPointer();

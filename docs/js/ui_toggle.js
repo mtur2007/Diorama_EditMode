@@ -231,6 +231,36 @@ const UI_BUTTON_META = {
         svg: DIFFERENCE_ICON_SVG,
         variant: 'icon-square',
     },
+    area: {
+        label: 'Area',
+        svg: SPACE_ICON_SVG,
+        variant: 'icon-square',
+    },
+    area_space: {
+        label: 'Area Space',
+        svg: SPACE_ICON_SVG,
+        variant: 'icon-square',
+    },
+    area_add: {
+        label: 'Area Add',
+        svg: ADD_POINT_ICON_SVG,
+        variant: 'icon-square',
+    },
+    area_move: {
+        label: 'Area Move',
+        svg: MOVE_POINT_ICON_SVG,
+        variant: 'icon-square',
+    },
+    area_rotation: {
+        label: 'Area Rotation',
+        svg: ROTATION_ICON_SVG,
+        variant: 'icon-square',
+    },
+    area_scale: {
+        label: 'Area Scale',
+        icon: '拡',
+        variant: 'icon-square',
+    },
     space: {
         label: 'Difference Space',
         svg: SPACE_ICON_SVG,
@@ -604,6 +634,14 @@ const uiTree = {
                 },
                 'excavation': '',
             },
+            'area': {
+                'area_space': {
+                    'area_add': '',
+                    'area_move': '',
+                    'area_rotation': '',
+                    'area_scale': '',
+                },
+            },
         },
         // 'custom': {
         //     'new': '',
@@ -725,30 +763,11 @@ function showRootButtons(rootKeys) {
 }
 
 function saveUiState(indexPath) {
-  try {
-    if (!Array.isArray(indexPath)) { return; }
-    const payload = {
-      indexPath: indexPath.filter((v) => Number.isInteger(v)),
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(payload));
-  } catch (err) {
-    console.warn('failed to save UI state', err);
-  }
+  return Boolean(Array.isArray(indexPath) && indexPath.length > 0);
 }
 
 function loadUiState() {
-  try {
-    const raw = localStorage.getItem(UI_STATE_STORAGE_KEY);
-    if (!raw) { return null; }
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.indexPath)) { return null; }
-    const path = parsed.indexPath.filter((v) => Number.isInteger(v));
-    return path.length > 0 ? path : null;
-  } catch (err) {
-    console.warn('failed to load UI state', err);
-    return null;
-  }
+  return null;
 }
 
 function applyUiState(indexPath, rootKeys) {
@@ -776,10 +795,6 @@ function applyUiStateById(id) {
 }
 
 function applySavedUiStateOrDefault(defaultId = 'see') {
-  const savedPath = loadUiState();
-  if (applyUiState(savedPath, rootKeys)) {
-    return true;
-  }
   if (!defaultId) {
     return false;
   }

@@ -486,6 +486,15 @@ export class TrainSystem {
   
   // 線路表示
   createTrack(curve, pointy ,color = 0x000000, name=false) {
+    const normalizedName = typeof name === 'string' ? name : '';
+    const isGreenHelperLine = Number(color) === 0x00ff00 && (
+      normalizedName === 'Rail'
+      || normalizedName.startsWith('GuideRail_')
+      || normalizedName.includes('RailSelectionLine')
+    );
+    if (isGreenHelperLine) {
+      return null;
+    }
     const points = curve.getPoints(100);
     // すべての点にY座標を追加 or 修正（例：Y=1.5）
     for (let i = 0; i < points.length; i++) {

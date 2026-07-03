@@ -692,12 +692,21 @@
       grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
       gap: 18px;
       align-items: start;
+      transition: grid-template-columns 760ms cubic-bezier(0.16, 1, 0.3, 1), gap 760ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .feature-hub-overview > * {
+      min-width: 0;
     }
     .feature-hub.is-detail-open .feature-hub-overview {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 0fr) minmax(320px, 1fr);
+      gap: 10px;
     }
     .feature-hub.is-detail-open > .feature-hub-overview > .manual-video-guide-inline {
-      display: none;
+      max-height: 0;
+      opacity: 0;
+      transform: translateX(-28px) scale(0.72);
+      filter: blur(6px);
+      pointer-events: none;
     }
     .feature-hub-children {
       display: grid;
@@ -715,6 +724,10 @@
       background: rgba(11, 21, 35, 0.84);
       border-color: rgba(141, 187, 245, 0.28);
     }
+    .feature-detail.is-closing {
+      background: rgba(7, 15, 26, 0.54);
+      border-color: rgba(141, 187, 245, 0.16);
+    }
     .feature-detail:hover,
     .feature-detail.is-video-focus {
       border-color: rgba(116, 225, 189, 0.48);
@@ -726,7 +739,7 @@
       cursor: pointer;
       padding: 16px 18px;
       position: relative;
-      transition: padding 320ms cubic-bezier(0.16, 1, 0.3, 1);
+      transition: padding 680ms cubic-bezier(0.16, 1, 0.3, 1);
     }
     .feature-detail > summary::before {
       content: "";
@@ -747,41 +760,46 @@
       grid-template-columns: auto minmax(0, 1fr) auto;
       gap: 14px;
       align-items: center;
-      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 680ms cubic-bezier(0.16, 1, 0.3, 1);
       transform-origin: left center;
     }
     .feature-summary-copy h4 {
       margin: 0 0 4px;
       font-size: 17px;
       color: var(--text);
-      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), color 220ms ease;
+      transition: transform 680ms cubic-bezier(0.16, 1, 0.3, 1), color 320ms ease;
     }
     .feature-summary-copy p {
       margin: 0;
       color: var(--muted);
       font-size: 14px;
-      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+      transition: transform 680ms cubic-bezier(0.16, 1, 0.3, 1), opacity 320ms ease;
     }
     .feature-summary-toggle {
-      color: #d5e7ff;
+      color: #8ff0c2;
       font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.03em;
-      transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+      transition: transform 640ms cubic-bezier(0.16, 1, 0.3, 1), opacity 320ms ease;
     }
     .feature-detail > summary .manual-icon-button {
-      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 220ms ease;
+      transition: transform 680ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 320ms ease, color 320ms ease, border-color 320ms ease;
       transform-origin: center center;
     }
     .feature-detail[open] > summary {
       padding-top: 18px;
       padding-bottom: 18px;
     }
+    .feature-detail.is-closing > summary {
+      padding-top: 16px;
+      padding-bottom: 16px;
+    }
     .feature-detail[open] .feature-summary {
       transform: translateY(-2px);
     }
     .feature-detail[open] .feature-summary-copy h4 {
       transform: translateY(-1px);
+      color: #8ff0c2;
     }
     .feature-detail[open] .feature-summary-copy p {
       transform: translateY(1px);
@@ -789,13 +807,42 @@
     }
     .feature-detail[open] > summary .manual-icon-button {
       transform: scale(1.04);
+      color: #8ff0c2;
+      border-color: rgba(143, 240, 194, 0.34);
       box-shadow: 0 0 0 1px rgba(116, 225, 189, 0.18), 0 10px 18px rgba(0, 0, 0, 0.18);
     }
+    .feature-detail.is-closing > summary .manual-icon-button {
+      transform: scale(1);
+      color: #f3f3f3;
+      border-color: rgba(255, 255, 255, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 18px rgba(0, 0, 0, 0.24);
+    }
+    .feature-detail.is-closing .feature-summary {
+      transform: translateY(0);
+    }
+    .feature-detail.is-closing .feature-summary-copy h4 {
+      transform: translateY(0);
+      color: var(--text);
+    }
+    .feature-detail.is-closing .feature-summary-copy p {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .feature-detail.is-closing .feature-summary-toggle,
+    .feature-detail[open].is-closing .feature-summary-toggle {
+      color: #8ff0c2;
+      transform: translateY(0);
+    }
     .feature-detail[open] .feature-summary-toggle {
+      color: #ff8f96;
       transform: translateY(-1px);
     }
     .feature-detail[open] .feature-summary-toggle::before {
       content: "close";
+    }
+    .feature-detail.is-closing .feature-summary-toggle::before,
+    .feature-detail[open].is-closing .feature-summary-toggle::before {
+      content: "open";
     }
     .feature-detail:not([open]) .feature-summary-toggle::before {
       content: "open";
@@ -808,11 +855,11 @@
       opacity: 0;
       visibility: hidden;
       transition:
-        grid-template-rows 360ms cubic-bezier(0.16, 1, 0.3, 1),
-        padding-bottom 360ms cubic-bezier(0.16, 1, 0.3, 1),
-        border-top-color 220ms ease,
-        opacity 220ms ease,
-        visibility 0s linear 360ms;
+        grid-template-rows 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        padding-bottom 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        border-top-color 420ms ease,
+        opacity 420ms ease,
+        visibility 0s linear 760ms;
     }
     .feature-detail[open] > .feature-detail-body {
       grid-template-rows: 1fr;
@@ -821,10 +868,23 @@
       opacity: 1;
       visibility: visible;
       transition:
-        grid-template-rows 360ms cubic-bezier(0.16, 1, 0.3, 1),
-        padding-bottom 360ms cubic-bezier(0.16, 1, 0.3, 1),
-        border-top-color 220ms ease,
-        opacity 220ms ease,
+        grid-template-rows 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        padding-bottom 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        border-top-color 420ms ease,
+        opacity 420ms ease,
+        visibility 0s linear 0s;
+    }
+    .feature-detail.is-closing > .feature-detail-body {
+      grid-template-rows: 0fr;
+      padding-bottom: 0;
+      border-top-color: rgba(141, 187, 245, 0);
+      opacity: 0;
+      visibility: visible;
+      transition:
+        grid-template-rows 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        padding-bottom 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        border-top-color 420ms ease,
+        opacity 760ms ease,
         visibility 0s linear 0s;
     }
     .feature-detail:not([open]) > .feature-detail-body {
@@ -835,11 +895,16 @@
       min-height: 0;
       transform: translateY(-10px);
       opacity: 0;
-      transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+      transition: transform 720ms cubic-bezier(0.16, 1, 0.3, 1), opacity 420ms ease;
     }
     .feature-detail[open] > .feature-detail-body .feature-detail-body-inner {
       transform: translateY(0);
       opacity: 1;
+    }
+    .feature-detail.is-closing > .feature-detail-body .feature-detail-body-inner {
+      transform: translateY(-10px);
+      opacity: 0;
+      transition: transform 720ms cubic-bezier(0.16, 1, 0.3, 1), opacity 760ms ease;
     }
     .feature-detail-body-inner > :first-child {
       margin-top: 14px;
@@ -850,6 +915,19 @@
       align-self: stretch;
       min-width: 0;
       width: 100%;
+      max-height: 960px;
+      overflow: hidden;
+      transform-origin: left center;
+      transition:
+        max-height 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        transform 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        opacity 520ms ease,
+        filter 520ms ease;
+    }
+    .feature-hub:not(.is-detail-open) .manual-video-guide.manual-video-guide-inline {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      filter: blur(0);
     }
     .manual-video-guide.manual-video-guide-inline .manual-video-stage {
       width: 100%;
@@ -872,19 +950,22 @@
     .manual-video-guide.manual-video-guide-inline .manual-video-meta h3 {
       font-size: 18px;
     }
-    .manual-video-scene-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    .manual-video-scene-pills .manual-video-jump {
-      min-height: 34px;
-      padding: 0 12px;
-      font-size: 13px;
-    }
     .feature-detail-video {
       margin: 18px 0 22px;
+    }
+    .feature-hub-children {
+      transform-origin: right center;
+      transition:
+        transform 760ms cubic-bezier(0.16, 1, 0.3, 1),
+        opacity 520ms ease;
+    }
+    .feature-hub:not(.is-detail-open) .feature-hub-children {
+      transform: translateX(-18px) scale(0.92);
+      opacity: 0.9;
+    }
+    .feature-hub.is-detail-open .feature-hub-children {
+      transform: translateX(0) scale(1);
+      opacity: 1;
     }
     .decoration-focus-layout {
       display: grid;
@@ -1248,6 +1329,21 @@
       .feature-hub-overview {
         grid-template-columns: 1fr;
       }
+      .feature-hub.is-detail-open .feature-hub-overview {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .feature-hub.is-detail-open > .feature-hub-overview > .manual-video-guide-inline {
+        max-height: 0;
+        opacity: 0;
+        transform: translateY(-12px) scale(0.92);
+      }
+      .feature-hub-children,
+      .feature-hub:not(.is-detail-open) .feature-hub-children,
+      .feature-hub.is-detail-open .feature-hub-children {
+        transform: none;
+        opacity: 1;
+      }
       .page {
         width: min(100vw - 20px, 1120px);
         padding-top: 20px;
@@ -1444,11 +1540,6 @@ keep_settings
                 <div class="manual-video-controls">
                   <button class="manual-video-action" type="button" data-video-play-all>連続再生</button>
                   <button class="manual-video-action is-secondary" type="button" data-video-replay-scene>このシーンを再生</button>
-                </div>
-                <div class="manual-video-scene-pills">
-                  <button class="manual-video-jump" type="button" data-video-scene="new">new</button>
-                  <button class="manual-video-jump" type="button" data-video-scene="move">move</button>
-                  <button class="manual-video-jump" type="button" data-video-scene="structure">structure</button>
                 </div>
               </div>
             </div>
@@ -1647,10 +1738,6 @@ keep_settings
                   <button class="manual-video-action" type="button" data-video-play-all>連続再生</button>
                   <button class="manual-video-action is-secondary" type="button" data-video-replay-scene>このシーンを再生</button>
                 </div>
-                <div class="manual-video-scene-pills">
-                  <button class="manual-video-jump" type="button" data-video-scene="add_point">add_point</button>
-                  <button class="manual-video-jump" type="button" data-video-scene="construction">construction</button>
-                </div>
               </div>
             </div>
           </div>
@@ -1817,19 +1904,6 @@ keep_settings
                       <div class="manual-video-controls">
                         <button class="manual-video-action" type="button" data-video-play-all>連続再生</button>
                         <button class="manual-video-action is-secondary" type="button" data-video-replay-scene>このシーンを再生</button>
-                      </div>
-                      <div class="manual-video-scene-pills">
-                        <button class="manual-video-jump" type="button" data-video-scene="add_point">add_point</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="construction">construction</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="copy">copy</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="group">group</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="template">template</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="guide">guide</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="rotation">rotation</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="search">search</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="move_point">move_point</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="style">style</button>
-                        <button class="manual-video-jump" type="button" data-video-scene="delete">delete</button>
                       </div>
                     </div>
                   </div>

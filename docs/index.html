@@ -3,268 +3,376 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>都市を走る鉄道模型 | Terminal</title>
-  <meta
-    name="description"
-    content="都市を走る鉄道模型の公開・編集・配布・ビューワー導線をまとめたターミナルページです。"
-  />
+  <title>都市を走る鉄道模型 | Package Page</title>
+  <meta name="description" content="都市を走る鉄道模型の紹介ページです。作品概要、見どころ、同梱内容、閲覧と編集への入口をまとめています。" />
   <link rel="stylesheet" href="./css/public.css" />
   <style>
-    .terminal-hero {
-      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
-      align-items: stretch;
+    :root {
+      --package-gold: #ffcc7a;
+      --package-warm: #ff9d5c;
+      --package-ink: rgba(8, 14, 27, 0.76);
     }
-    .terminal-copy {
+
+    body {
+      background:
+        radial-gradient(circle at 18% 12%, rgba(255, 196, 118, 0.18), transparent 24%),
+        radial-gradient(circle at 82% 18%, rgba(129, 212, 255, 0.14), transparent 28%),
+        linear-gradient(180deg, #08111d 0%, #0d1830 44%, #12213f 100%);
+    }
+
+    .package-page {
+      gap: 54px;
+    }
+
+    .package-hero {
       position: relative;
       overflow: hidden;
-      border-color: rgba(122, 223, 255, 0.38);
+      grid-template-columns: 1.1fr 0.9fr;
+      padding: 0;
+      border: none;
+      border-radius: 34px;
       background:
-        radial-gradient(circle at 0% 0%, rgba(84, 213, 255, 0.2), transparent 34%),
-        linear-gradient(180deg, rgba(10, 19, 37, 0.96), rgba(8, 14, 27, 0.94));
+        radial-gradient(circle at 0% 0%, rgba(255, 195, 107, 0.16), transparent 30%),
+        linear-gradient(135deg, rgba(255, 170, 87, 0.08), transparent 42%),
+        linear-gradient(180deg, rgba(9, 18, 33, 0.48), rgba(6, 13, 23, 0.62));
+      box-shadow: 0 36px 90px rgba(0, 0, 0, 0.28);
     }
-    .terminal-copy::after {
+
+    .package-hero::before {
       content: "";
       position: absolute;
-      inset: auto -80px -80px auto;
-      width: 280px;
-      height: 280px;
-      border-radius: 999px;
-      background: radial-gradient(circle, rgba(78, 142, 255, 0.22), transparent 66%);
+      inset: 0;
+      background:
+        radial-gradient(circle at 82% 16%, rgba(255, 201, 122, 0.22), transparent 28%),
+        linear-gradient(180deg, transparent 0 68%, rgba(3, 7, 14, 0.7) 100%);
       pointer-events: none;
     }
-    .terminal-heading {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+
+    .package-copy,
+    .package-visual {
+      position: relative;
+      z-index: 1;
+      min-width: 0;
     }
-    .signal-badge {
+
+    .package-copy {
+      padding: clamp(26px, 5vw, 54px) clamp(22px, 5vw, 56px);
+    }
+
+    .package-kicker {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding: 8px 12px;
       border-radius: 999px;
-      border: 1px solid rgba(132, 231, 255, 0.36);
-      background: rgba(7, 18, 36, 0.76);
-      font-size: 11px;
+      border: 1px solid rgba(255, 206, 132, 0.24);
+      background: rgba(255, 180, 90, 0.06);
+      color: #ffe6bf;
+      font-size: 12px;
       letter-spacing: 0.08em;
-      color: #cfeeff;
     }
-    .signal-badge::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: #8cffaa;
-      box-shadow: 0 0 10px rgba(140, 255, 170, 0.8);
+
+    .package-copy h1 {
+      max-width: 10ch;
     }
-    .terminal-copy .lead {
-      max-width: 56ch;
-    }
-    .terminal-actions {
-      margin-top: 22px;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .route-summary {
-      margin-top: 18px;
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-    }
-    .route-pill {
-      padding: 12px 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(150, 196, 255, 0.18);
-      background: rgba(5, 12, 24, 0.54);
-    }
-    .route-pill strong {
-      display: block;
+
+    .package-copy .lead {
+      max-width: 46ch;
       font-size: 16px;
-      color: #f2f8ff;
     }
-    .route-pill span {
-      display: block;
-      margin-top: 4px;
-      font-size: 12px;
-      color: #a8c4e4;
+
+    .package-actions {
+      margin-top: 26px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
     }
-    .terminal-status {
-      display: grid;
-      gap: 14px;
+
+    .package-note {
+      margin: 28px 0 0;
+      padding-top: 18px;
+      max-width: 44ch;
+      border-top: 1px solid rgba(218, 232, 255, 0.16);
+      color: #c9daf0;
+      font-size: 13px;
     }
-    .terminal-status .status-board {
+
+    .package-note strong {
+      color: #fff1d3;
+    }
+
+    .package-visual {
       min-height: 100%;
+      padding: 24px 24px 24px 0;
+      display: grid;
+      align-content: stretch;
+      gap: 16px;
+      background:
+        linear-gradient(180deg, rgba(255, 184, 103, 0.05), transparent 38%),
+        rgba(6, 13, 24, 0.08);
     }
-    .status-callout {
-      margin: 14px 0 0;
-      padding: 12px 14px;
-      border-radius: 12px;
-      border: 1px dashed rgba(143, 221, 255, 0.32);
-      background: rgba(7, 18, 36, 0.48);
-      color: #c9def2;
-      font-size: 12px;
-      line-height: 1.6;
+
+    .hero-poster {
+      position: relative;
+      min-height: 420px;
+      border-radius: 30px;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(4, 9, 18, 0.16), rgba(4, 9, 18, 0.74)),
+        url("./textures/test_station.jpg") center center / cover no-repeat;
+      box-shadow: 0 28px 60px rgba(0, 0, 0, 0.3);
     }
-    .terminal-grid {
+
+    .hero-poster::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 44%;
+      background: linear-gradient(180deg, transparent, rgba(2, 5, 11, 0.92));
+    }
+
+    .poster-copy {
+      position: absolute;
+      inset: auto 24px 24px 24px;
+      z-index: 1;
+    }
+
+    .poster-label,
+    .poster-copy strong {
+      display: block;
+    }
+
+    .poster-label {
+      margin-bottom: 6px;
+      color: #ffe5bf;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+    }
+
+    .poster-copy strong {
+      font-size: clamp(22px, 3vw, 30px);
+      line-height: 1.15;
+    }
+
+    .poster-copy span {
+      display: block;
+      margin-top: 8px;
+      color: #d6e7fa;
+      font-size: 13px;
+    }
+
+    .package-stats {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
+      gap: 18px;
     }
-    .route-card,
-    .flow-card,
-    .spec-card {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--panel);
-      backdrop-filter: blur(8px);
-      box-shadow: var(--shadow);
+
+    .package-stat {
+      padding: 4px 0 0;
+      border-radius: 0;
+      border: none;
+      border-top: 1px solid rgba(255, 220, 170, 0.2);
+      background: transparent;
     }
-    .route-card {
-      display: grid;
-      gap: 14px;
-      padding: 18px;
-      text-decoration: none;
-      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+
+    .package-stat strong,
+    .package-stat span {
+      display: block;
     }
-    .route-card:hover {
-      transform: translateY(-2px);
-      border-color: rgba(141, 220, 255, 0.56);
-      background: rgba(10, 22, 41, 0.84);
+
+    .package-stat strong {
+      color: #fff0d2;
+      font-size: 18px;
     }
-    .route-card[data-tone="view"] {
-      border-color: rgba(116, 225, 189, 0.3);
-    }
-    .route-card[data-tone="edit"] {
-      border-color: rgba(255, 211, 77, 0.34);
-    }
-    .route-card[data-tone="asset"] {
-      border-color: rgba(132, 188, 255, 0.3);
-    }
-    .route-topline {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      color: #9bc8ef;
-      font-size: 11px;
-      letter-spacing: 0.08em;
-    }
-    .route-topline strong {
-      color: #f4f8ff;
+
+    .package-stat span {
+      margin-top: 4px;
+      color: #9db5cf;
       font-size: 12px;
     }
-    .route-card h2 {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.15;
-      color: #f3f8ff;
+
+    .package-section,
+    .package-grid-card {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
-    .route-card p {
-      margin: 0;
-      color: #b7c9de;
+
+    .package-section {
+      position: relative;
+      padding: 0;
     }
-    .route-tags {
+
+    .package-section::before {
+      content: "";
+      display: block;
+      width: min(100%, 720px);
+      height: 1px;
+      margin-bottom: 26px;
+      background: linear-gradient(90deg, rgba(255, 206, 132, 0.44), rgba(255, 206, 132, 0));
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .section-head h2,
+    .package-grid-card h3 {
+      margin: 0;
+    }
+
+    .section-head p,
+    .package-grid-card p,
+    .package-list li,
+    .entry-card p {
+      color: var(--text-sub);
+    }
+
+    .package-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 28px;
+    }
+
+    .package-grid-card {
+      padding: 0;
+    }
+
+    .package-grid-card .card-num {
+      color: var(--package-gold);
+    }
+
+    .package-chip-row {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
+      margin-top: 18px;
     }
-    .route-tags span {
-      padding: 6px 10px;
+
+    .package-chip {
+      padding: 7px 11px;
       border-radius: 999px;
-      border: 1px solid rgba(152, 196, 255, 0.18);
-      background: rgba(7, 14, 28, 0.6);
-      color: #d4e9ff;
-      font-size: 11px;
-      letter-spacing: 0.06em;
-    }
-    .route-foot {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-top: auto;
-      color: #dff1ff;
+      border: 1px solid rgba(255, 205, 128, 0.18);
+      background: rgba(255, 190, 106, 0.04);
+      color: #ffe4bc;
       font-size: 12px;
     }
-    .flow-layout {
+
+    .showcase-grid,
+    .entry-grid {
       display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 28px;
     }
-    .flow-card,
-    .spec-card {
-      padding: 18px;
+
+    .showcase-card,
+    .entry-card {
+      overflow: visible;
+      border-radius: 0;
+      border: none;
+      background: transparent;
     }
-    .flow-card h2,
-    .spec-card h2 {
+
+    .showcase-media {
+      min-height: 300px;
+      background-size: cover;
+      background-position: center;
+      position: relative;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.24);
+    }
+
+    .showcase-media::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(4, 10, 19, 0.08), rgba(4, 10, 19, 0.72));
+    }
+
+    .showcase-copy,
+    .entry-card {
+      padding: 0;
+    }
+
+    .showcase-copy h3 {
+      margin: 18px 0 0;
+      font-size: 22px;
+    }
+
+    .showcase-copy p {
+      margin: 10px 0 0;
+      color: var(--text-sub);
+    }
+
+    .package-list {
+      margin: 0;
+      padding-left: 18px;
+      max-width: 78ch;
+    }
+
+    .package-list li + li {
+      margin-top: 10px;
+    }
+
+    .entry-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 24px 0 0;
+      border-top: 1px solid rgba(255, 205, 128, 0.18);
+    }
+
+    .entry-card h3 {
       margin: 0;
       font-size: 22px;
     }
-    .flow-list {
-      margin: 16px 0 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 12px;
+
+    .entry-card .hero-actions {
+      margin-top: auto;
     }
-    .flow-list li {
-      padding: 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(152, 196, 255, 0.18);
-      background: rgba(5, 12, 24, 0.54);
-    }
-    .flow-list strong {
-      display: block;
-      color: #f4f8ff;
-      font-size: 15px;
-    }
-    .flow-list span {
-      display: block;
-      margin-top: 6px;
-      color: #b7c9de;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .spec-list {
-      margin: 16px 0 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 10px;
-    }
-    .spec-list li {
-      display: flex;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 10px 0;
-      border-top: 1px solid rgba(152, 196, 255, 0.14);
-      color: #b7c9de;
-      font-size: 13px;
-    }
-    .spec-list li:first-child {
-      border-top: 0;
-      padding-top: 0;
-    }
-    .spec-list strong {
-      color: #eff6ff;
-      white-space: nowrap;
-    }
-    .footer-note {
-      margin: 0;
-      color: #97b9dc;
+
+    .entry-meta {
+      color: var(--package-gold);
       font-size: 12px;
-      text-align: center;
+      letter-spacing: 0.08em;
     }
-    @media (max-width: 980px) {
-      .terminal-hero,
-      .flow-layout,
-      .terminal-grid {
+
+    .footer {
+      width: min(1160px, 92vw);
+      margin: 30px auto 48px;
+      color: #97abc3;
+      font-size: 12px;
+    }
+
+    @media (max-width: 960px) {
+      .package-hero,
+      .package-grid,
+      .showcase-grid,
+      .entry-grid {
         grid-template-columns: 1fr;
       }
-      .route-summary {
+
+      .package-stats {
         grid-template-columns: 1fr;
+      }
+
+      .package-copy h1 {
+        max-width: none;
+      }
+
+      .package-visual {
+        padding: 0 22px 26px;
+      }
+
+      .hero-poster {
+        min-height: 320px;
       }
     }
   </style>
@@ -273,223 +381,176 @@
   <div class="bg-noise" aria-hidden="true"></div>
 
   <header class="top-bar">
-    <p class="brand">TOKYO DIORAMA / <span class="brand-glow-green">TERMINAL</span></p>
+    <p class="brand">TOKYO DIORAMA / <span class="brand-yellow">PACKAGE</span> PAGE</p>
     <div class="top-bar-actions">
-      <span class="auth-chip">LOCAL HUB</span>
-      <a class="ghost-btn" href="./vewbasis.html">ビューワー起動</a>
-      <a class="ghost-btn" href="./edit.html">編集ページ</a>
+      <a class="ghost-btn" href="./public.html">公開ページへ</a>
+      <a class="ghost-btn" href="./edit.html">編集ページへ</a>
+      <a class="ghost-btn" href="./manual.html" target="_blank" rel="noopener noreferrer">操作ガイド</a>
     </div>
   </header>
 
-  <main class="page">
-    <section class="hero terminal-hero">
-      <div class="hero-copy terminal-copy">
-        <p class="eyebrow">CENTRAL ENTRY / LOCAL OPERATION DESK</p>
-        <div class="terminal-heading">
-          <h1>鉄道模型ターミナル</h1>
-          <span class="signal-badge">ROUTE READY</span>
-        </div>
+  <main class="page package-page">
+    <section class="hero package-hero" aria-label="作品紹介">
+      <div class="package-copy">
+        <p class="package-kicker">3D CITY RAILWAY DIORAMA / INTRODUCTION</p>
+        <p class="eyebrow">都市マップを使って眺める、走らせる、編集する</p>
+        <h1>都市を走る鉄道模型</h1>
         <p class="lead">
-          この `index.html` は、公開閲覧、編集、モデル配布、ベースビューワーを束ねる入口です。
-          `st_` `ct_` `tr_` の素材を使い分けながら、必要なページへここから分岐できます。
+          都市景観の中を鉄道が走る 3D ジオラマです。公開ワールドを閲覧するだけでなく、
+          ローカルデータの読み込みや簡易編集にも対応し、ひとつの作品を「見る」「集める」「作る」の流れで楽しめます。
         </p>
-        <div class="terminal-actions">
-          <a class="primary-btn" href="./vewbasis.html">ベースビューワーを開く</a>
-          <a class="ghost-btn" href="./public.html">公開ページへ</a>
-          <a class="ghost-btn" href="./manual.html">操作マニュアル</a>
+        <div class="package-actions">
+          <a class="primary-btn" href="./public.html">今すぐ見に行く</a>
+          <a class="ghost-btn" href="#package-contents">内容を見る</a>
+          <a class="ghost-btn" href="#entry-points">入口を選ぶ</a>
         </div>
-        <div class="route-summary" aria-label="主要導線">
-          <div class="route-pill">
-            <strong>VIEW</strong>
-            <span>`vewbasis.html` でワールドを直接表示</span>
-          </div>
-          <div class="route-pill">
-            <strong>EDIT</strong>
-            <span>`edit.html` で編集枠と保存済み素材を管理</span>
-          </div>
-          <div class="route-pill">
-            <strong>ASSET</strong>
-            <span>`assets.html` と `public.html` で配布物を扱う</span>
-          </div>
-        </div>
+        <p class="package-note">
+          <strong>推奨環境:</strong> README の案内に合わせ、Apple 製品での Safari 利用を想定した構成です。
+        </p>
       </div>
 
-      <div class="terminal-status">
-        <aside class="status-board" aria-label="運行状況">
-          <p class="status-title">ROUTE MATRIX</p>
-          <div class="status-row">
-            <span>Viewer Core</span>
-            <strong class="on">./vewbasis.html</strong>
+      <div class="package-visual" aria-hidden="true">
+        <div class="hero-poster">
+          <div class="poster-copy">
+            <span class="poster-label">PACKAGE FRONT</span>
+            <strong>駅、街区、車両が<br>ひとつの情景でつながる。</strong>
+            <span>都市モデル、構造物、列車モデルを組み合わせてワールドを構成します。</span>
           </div>
-          <div class="status-row">
-            <span>Public Access</span>
-            <strong class="on">./public.html</strong>
+        </div>
+        <div class="package-stats">
+          <div class="package-stat">
+            <strong>PUBLIC VIEW</strong>
+            <span>公開済みワールドの閲覧入口</span>
           </div>
-          <div class="status-row">
-            <span>Edit Console</span>
-            <strong class="on">./edit.html</strong>
+          <div class="package-stat">
+            <strong>EDIT LAB</strong>
+            <span>編集枠の管理と再開に対応</span>
           </div>
-          <div class="status-row">
-            <span>Model Library</span>
-            <strong class="on">./assets.html</strong>
+          <div class="package-stat">
+            <strong>LOCAL LOAD</strong>
+            <span>ZIP / JSON / GLB などの読込に対応</span>
           </div>
-          <div class="status-row">
-            <span>Manual</span>
-            <strong class="on">./manual.html</strong>
-          </div>
-          <div class="status-callout">
-            サムネイル撮影は `public_local_load.html` から行います。
-            編集途中のワールドに対して、構図決定とプレビュー保存を行うための補助ルートです。
-          </div>
-        </aside>
+        </div>
       </div>
     </section>
 
-    <section class="terminal-grid" aria-label="主要ページ">
-      <a class="route-card" href="./vewbasis.html" data-tone="view">
-        <div class="route-topline">
-          <span>DIRECT RUNTIME</span>
-          <strong>VIEW BASIS</strong>
+    <section class="package-section" id="package-contents" aria-label="パッケージ内容">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">PACKAGE CONTENTS</p>
+          <h2>このページで伝える内容</h2>
         </div>
-        <h2>ベースビューワー</h2>
-        <p>現在のランタイム表示面です。構造物・都市・車両の読み込み後、そのままワールド表示へ進みます。</p>
-        <div class="route-tags">
-          <span>Runtime</span>
-          <span>World View</span>
-          <span>Direct Open</span>
-        </div>
-        <div class="route-foot">
-          <span>起点になる表示面</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-
-      <a class="route-card" href="./public.html" data-tone="asset">
-        <div class="route-topline">
-          <span>PUBLIC ACCESS</span>
-          <strong>CATALOG</strong>
-        </div>
-        <h2>公開ページ</h2>
-        <p>公開ワールド一覧と、構造物・都市・車両のダウンロード導線をまとめた一般向け入口です。</p>
-        <div class="route-tags">
-          <span>Public Maps</span>
-          <span>Download</span>
-          <span>Quota</span>
-        </div>
-        <div class="route-foot">
-          <span>配布と閲覧の表玄関</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-
-      <a class="route-card" href="./edit.html" data-tone="edit">
-        <div class="route-topline">
-          <span>EDITOR ACCESS</span>
-          <strong>WORKBENCH</strong>
-        </div>
-        <h2>編集ページ</h2>
-        <p>編集枠の選択、保存済みデータの再開、サムネ撮影、公開前の管理を行うワークベンチです。</p>
-        <div class="route-tags">
-          <span>Slot Control</span>
-          <span>Resume</span>
-          <span>Publish Prep</span>
-        </div>
-        <div class="route-foot">
-          <span>編集作業の主導線</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-
-      <a class="route-card" href="./assets.html" data-tone="asset">
-        <div class="route-topline">
-          <span>MODEL SUPPLY</span>
-          <strong>LIBRARY</strong>
-        </div>
-        <h2>モデル配布庫</h2>
-        <p>都市モデルと列車モデルを選んで取得するページです。ローカルローダーへ渡す前段の素材置き場になります。</p>
-        <div class="route-tags">
-          <span>ct_</span>
-          <span>tr_</span>
-          <span>Download Hub</span>
-        </div>
-        <div class="route-foot">
-          <span>素材の補給線</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-
-      <a class="route-card" href="./public_local_load.html?runtime_map=edit_upload" data-tone="view">
-        <div class="route-topline">
-          <span>THUMBNAIL CAPTURE</span>
-          <strong>LOCAL VIEWER</strong>
-        </div>
-        <h2>サムネ撮影ルート</h2>
-        <p>編集ワールドを読み込んで構図を決め、スロットのサムネイルを保存するための補助ビューワーです。</p>
-        <div class="route-tags">
-          <span>Capture</span>
-          <span>Preview</span>
-          <span>Slot Thumbnail</span>
-        </div>
-        <div class="route-foot">
-          <span>編集補助の短絡ルート</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-
-      <a class="route-card" href="./manual.html" data-tone="asset">
-        <div class="route-topline">
-          <span>REFERENCE</span>
-          <strong>MANUAL</strong>
-        </div>
-        <h2>操作マニュアル</h2>
-        <p>ボタン群とモード構成の説明書です。編集機能の意味や UI ツリーを確認したいときに使います。</p>
-        <div class="route-tags">
-          <span>Guide</span>
-          <span>UI Tree</span>
-          <span>Reference</span>
-        </div>
-        <div class="route-foot">
-          <span>構成確認用の参照面</span>
-          <span>→ Open</span>
-        </div>
-      </a>
-    </section>
-
-    <section class="flow-layout" aria-label="起動フロー">
-      <div class="flow-card">
-        <p class="meta-label">OPERATION FLOW</p>
-        <h2>起動順</h2>
-        <ol class="flow-list">
-          <li>
-            <strong>1. 素材を揃える</strong>
-            <span>`public.html` または `assets.html` で `st_` `ct_` `tr_` を確認し、必要なデータを手元へ集めます。</span>
-          </li>
-          <li>
-            <strong>2. 閲覧か編集かを選ぶ</strong>
-            <span>表示確認だけなら `vewbasis.html`、編集作業に入るなら `edit.html` を起点にします。</span>
-          </li>
-          <li>
-            <strong>3. 必要ならサムネを撮る</strong>
-            <span>`public_local_load.html` でワールドを読み込み、構図を決めてサムネイルへ反映します。</span>
-          </li>
-        </ol>
+        <p>製品パッケージの表面と裏面を意識して、作品の魅力と導線をまとめています。</p>
       </div>
 
-      <aside class="spec-card">
-        <p class="meta-label">FILE GUIDE</p>
-        <h2>素材の目印</h2>
-        <ul class="spec-list">
-          <li><strong>st_~</strong><span>構造物データ。公開ワールドや編集再開の基礎になる本体。</span></li>
-          <li><strong>ct_~</strong><span>都市モデル。街並みや背景オブジェクトの読み込み用。</span></li>
-          <li><strong>tr_~</strong><span>列車モデル。車両フォルダまたは個別モデルとして扱う前提。</span></li>
-          <li><strong>vewbasis.html</strong><span>旧 `index.html` の役割を引き継いだベース表示面。</span></li>
-        </ul>
-      </aside>
+      <div class="package-grid">
+        <article class="package-grid-card">
+          <p class="card-num">01</p>
+          <h3>作品の雰囲気</h3>
+          <p>駅、線路、都市背景をひとつの情景として見せ、世界観の第一印象を作ります。</p>
+          <div class="package-chip-row">
+            <span class="package-chip">3D Diorama</span>
+            <span class="package-chip">Urban Railway</span>
+          </div>
+        </article>
+        <article class="package-grid-card">
+          <p class="card-num">02</p>
+          <h3>できること</h3>
+          <p>公開ワールドの閲覧、ローカルファイルの読み込み、編集ワールドの再開まで案内します。</p>
+          <div class="package-chip-row">
+            <span class="package-chip">View</span>
+            <span class="package-chip">Load</span>
+            <span class="package-chip">Edit</span>
+          </div>
+        </article>
+        <article class="package-grid-card">
+          <p class="card-num">03</p>
+          <h3>入口の整理</h3>
+          <p>初見ユーザは公開ページへ、制作側は編集ページへ進めるように分岐を明確にしています。</p>
+          <div class="package-chip-row">
+            <span class="package-chip">Public</span>
+            <span class="package-chip">Editor</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="package-section" aria-label="見どころ">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">HIGHLIGHTS</p>
+          <h2>見どころ</h2>
+        </div>
+        <p>パッケージ裏面にある紹介文のように、作品の楽しみ方を短く整理しています。</p>
+      </div>
+
+      <div class="showcase-grid">
+        <article class="showcase-card">
+          <div class="showcase-media" style="background-image: url('./textures/test_station.jpg');"></div>
+          <div class="showcase-copy">
+            <h3>駅の情景を観察する</h3>
+            <p>ホーム、線路、周辺構造物を一枚のジオラマとして眺める構成です。公開ワールドからすぐに雰囲気を確認できます。</p>
+          </div>
+        </article>
+        <article class="showcase-card">
+          <div class="showcase-media" style="background-image: url('./textures/ct.jpg');"></div>
+          <div class="showcase-copy">
+            <h3>都市と車両を差し替える</h3>
+            <p>都市モデルと列車モデルを読み込むことで、同じ構造でも印象を切り替えられます。ローカルロードとの相性が良い構成です。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="package-section" aria-label="同梱イメージ">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">INSIDE THE BOX</p>
+          <h2>同梱イメージ</h2>
+        </div>
+        <p>製品で言えば「箱の中に何が入っているか」に相当する説明です。</p>
+      </div>
+      <ul class="package-list">
+        <li>公開ワールド閲覧ページ: 配布済みワールドの確認と構造物データの取得。</li>
+        <li>モデルカタログ: 都市モデル `ct_` と車両モデル `tr_` の確認とダウンロード。</li>
+        <li>編集ページ: 編集枠の選択、保存済みワールドの再開、サムネ撮影と公開導線。</li>
+        <li>操作ガイド: PC / モバイルごとの基本操作の確認。</li>
+      </ul>
+    </section>
+
+    <section class="package-section" id="entry-points" aria-label="ページ入口">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">ENTRY POINTS</p>
+          <h2>どこから入るか選ぶ</h2>
+        </div>
+        <p>初見向けと制作向けで入口を分け、迷いにくい構成にしています。</p>
+      </div>
+
+      <div class="entry-grid">
+        <article class="entry-card">
+          <span class="entry-meta">FOR VIEWERS</span>
+          <h3>公開ページへ</h3>
+          <p>まず作品を見せたい場合の入口です。公開ワールドの一覧、ローカルマップローダー、モデル配布をまとめています。</p>
+          <div class="hero-actions">
+            <a class="primary-btn" href="./public.html">公開ページを開く</a>
+          </div>
+        </article>
+        <article class="entry-card">
+          <span class="entry-meta">FOR CREATORS</span>
+          <h3>編集ページへ</h3>
+          <p>制作や再編集を行う場合の入口です。編集枠の管理、保存済みデータ確認、再開操作へ進めます。</p>
+          <div class="hero-actions">
+            <a class="ghost-btn" href="./edit.html">編集ページを開く</a>
+            <a class="ghost-btn" href="./manual.html" target="_blank" rel="noopener noreferrer">操作ガイド</a>
+          </div>
+        </article>
+      </div>
     </section>
   </main>
 
   <footer class="footer">
-    <p class="footer-note">Train_EditMode_demo / Terminal Entry</p>
+    <p>Train_EditMode_demo / Package-style Introduction Page</p>
   </footer>
 </body>
 </html>

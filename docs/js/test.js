@@ -1216,7 +1216,6 @@ function initializeManualVideoGuides() {
     const status = guide.querySelector('[data-video-status]');
     const playAllButton = guide.querySelector('[data-video-play-all]');
     const replayButton = guide.querySelector('[data-video-replay-scene]');
-    const sceneButtons = guide.querySelectorAll('[data-video-scene]');
     const sceneCards = guide.querySelectorAll('[data-scene-card]');
     if (!player || !placeholder || !shell || !title || !description || !status || !playAllButton || !replayButton) { return; }
 
@@ -1289,6 +1288,7 @@ function initializeManualVideoGuides() {
     function setScene(sceneId, options = {}) {
       const nextIndex = sceneIndexById.get(sceneId);
       if (nextIndex == null) { return; }
+      state.autoSequencePreferred = false;
       state.sceneIndex = nextIndex;
       playCurrentScene(options);
     }
@@ -1337,14 +1337,6 @@ function initializeManualVideoGuides() {
     replayButton.addEventListener('click', () => {
       state.autoSequencePreferred = false;
       playCurrentScene({ autoplay: true, sequence: false });
-    });
-
-    sceneButtons.forEach((button) => {
-      button.addEventListener('click', () => {
-        const sceneId = button.dataset.videoScene || '';
-        state.autoSequencePreferred = false;
-        setScene(sceneId, { autoplay: true, sequence: false });
-      });
     });
 
     playCurrentScene({ autoplay: false, sequence: false });
@@ -1402,6 +1394,9 @@ function initializeManualVideoGuides() {
     });
 
     centeredPlaybackObserver.observe(guide);
+    guide.manualVideoSetScene = (sceneId, options = {}) => {
+      setScene(sceneId, options);
+    };
     guide.manualVideoViewportUpdate = updateViewportPlayback;
     window.addEventListener('scroll', updateViewportPlayback, { passive: true });
     window.addEventListener('resize', updateViewportPlayback);
@@ -1419,9 +1414,8 @@ function initializeManualVideoGuides() {
       guide.hidden = false;
     }
     guide.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    const internalButton = guide.querySelector(`[data-video-scene="${sceneId}"]`);
-    if (internalButton instanceof HTMLButtonElement) {
-      internalButton.click();
+    if (typeof guide.manualVideoSetScene === 'function') {
+      guide.manualVideoSetScene(sceneId, { autoplay: true, sequence: false });
     }
     window.requestAnimationFrame(() => {
       if (typeof guide.manualVideoViewportUpdate === 'function') {
@@ -1464,6 +1458,8 @@ function initializeFeatureDetailBodies() {
 
 initializeFeatureDetailBodies();
 
+const FEATURE_DETAIL_TOGGLE_MS = 760;
+
 function initializeFeatureHubAccordions() {
   document.querySelectorAll('.feature-hub').forEach((hub) => {
     const childrenContainer = hub.querySelector('.feature-hub-children');
@@ -1474,11 +1470,48 @@ function initializeFeatureHubAccordions() {
     if (!detailsList.length) { return; }
 
     function syncHubState() {
-      const hasOpenDetail = detailsList.some((detail) => detail.open);
+      const hasOpenDetail = detailsList.some((detail) => (
+        detail.open && detail.dataset.closingIntent !== 'true'
+      ));
       hub.classList.toggle('is-detail-open', hasOpenDetail);
     }
 
     detailsList.forEach((detail) => {
+      const summary = detail.querySelector(':scope > summary');
+      if (summary instanceof HTMLElement) {
+        let closeTimer = 0;
+
+        summary.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (detail.dataset.animating === 'true') { return; }
+
+          window.clearTimeout(closeTimer);
+          detail.dataset.animating = 'true';
+
+          if (detail.open) {
+            detail.dataset.closingIntent = 'true';
+            detail.classList.add('is-closing');
+            syncHubState();
+            closeTimer = window.setTimeout(() => {
+              detail.open = false;
+              detail.classList.remove('is-closing');
+              delete detail.dataset.closingIntent;
+              delete detail.dataset.animating;
+              syncHubState();
+            }, FEATURE_DETAIL_TOGGLE_MS);
+            return;
+          }
+
+          delete detail.dataset.closingIntent;
+          detail.classList.remove('is-closing');
+          detail.open = true;
+          syncHubState();
+          window.setTimeout(() => {
+            delete detail.dataset.animating;
+          }, FEATURE_DETAIL_TOGGLE_MS);
+        });
+      }
+
       detail.addEventListener('toggle', syncHubState);
     });
 
@@ -1514,9 +1547,8 @@ function initializeFeatureHubAccordions() {
       summary.addEventListener('click', (event) => {
         event.preventDefault();
         const sceneId = detail.dataset.sceneCard || '';
-        const sceneButton = guide.querySelector(`[data-video-scene="${sceneId}"]`);
-        if (sceneButton instanceof HTMLButtonElement) {
-          sceneButton.click();
+        if (typeof guide.manualVideoSetScene === 'function') {
+          guide.manualVideoSetScene(sceneId, { autoplay: true, sequence: false });
         }
       });
     });
