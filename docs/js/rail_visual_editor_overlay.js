@@ -12,6 +12,8 @@
   let outputLogBody = null;
   let outputErrorBody = null;
   let outputCaptureDepth = 0;
+  let currentSearchTerm = '';
+  let activeSearchResultLine = 0;
 
   function createStyle() {
     if (document.getElementById('rail-visual-editor-style')) {
@@ -149,33 +151,118 @@
       #${OVERLAY_ID} .rv-line-number {
         display: block;
       }
+      #${OVERLAY_ID} .rv-editor-stage {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+      #${OVERLAY_ID} .rv-code-highlights,
       #${OVERLAY_ID} textarea {
+        margin: 0;
+        padding: 44px 10px 10px;
+        font: 11px/1.55 SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre;
+        tab-size: 2;
+      }
+      #${OVERLAY_ID} .rv-code-highlights {
+        position: absolute;
+        inset: 0;
+        border: 0;
+        background: transparent;
+        color: #d9e4f2;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      #${OVERLAY_ID} .rv-code-highlights code {
+        display: block;
+        min-height: 100%;
+      }
+      #${OVERLAY_ID} textarea {
+        position: absolute;
+        inset: 0;
         width: 100%;
         height: 100%;
         min-height: 0;
-        margin: 0;
         border: 0;
-        padding: 44px 10px 10px;
         background: transparent;
-        color: #d9e4f2;
-        font: 11px/1.55 SFMono-Regular, Menlo, Consolas, monospace;
+        color: transparent;
+        caret-color: #edf4ff;
         resize: none;
-        white-space: pre;
-        tab-size: 2;
         outline: none;
         overflow: auto;
+      }
+      #${OVERLAY_ID} textarea::selection {
+        background: rgba(57, 119, 214, 0.38);
+      }
+      #${OVERLAY_ID} .rv-token-keyword {
+        color: #7cc7ff;
+      }
+      #${OVERLAY_ID} .rv-token-number {
+        color: #f6c177;
+      }
+      #${OVERLAY_ID} .rv-token-operator {
+        color: #f29db2;
+      }
+      #${OVERLAY_ID} .rv-token-bracket {
+        color: #b9a0ff;
+      }
+      #${OVERLAY_ID} .rv-token-string {
+        color: #a8e6a1;
+      }
+      #${OVERLAY_ID} .rv-token-comment {
+        color: rgba(156, 177, 202, 0.68);
+      }
+      #${OVERLAY_ID} .rv-token-boolean {
+        color: #7ce0d3;
       }
       #${OVERLAY_ID} .rv-actions {
         position: absolute;
         top: 31px;
         right: 22px;
         display: flex;
+        flex-direction: column;
+        align-items: stretch;
         gap: 6px;
-        flex-wrap: wrap;
         padding: 5px;
         border: 1px solid rgba(96, 118, 148, 0.28);
         background: rgba(12, 17, 24, 0.92);
         z-index: 2;
+        min-width: 248px;
+      }
+      #${OVERLAY_ID} .rv-action-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      #${OVERLAY_ID} .rv-search-stack {
+        display: grid;
+        gap: 6px;
+      }
+      #${OVERLAY_ID} .rv-search-input,
+      #${OVERLAY_ID} .rv-search-results {
+        width: 100%;
+        border: 1px solid rgba(115, 134, 158, 0.32);
+        padding: 8px 10px;
+        font: 11px/1.2 SFMono-Regular, Menlo, Consolas, monospace;
+        background: linear-gradient(180deg, #141b24 0%, #0f151d 100%);
+        color: #d7dfeb;
+        outline: none;
+        border-radius: 0;
+      }
+      #${OVERLAY_ID} .rv-search-input::placeholder {
+        color: rgba(215, 223, 235, 0.5);
+      }
+      #${OVERLAY_ID} .rv-search-input:focus,
+      #${OVERLAY_ID} .rv-search-results:focus {
+        border-color: #1f6feb;
+        box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.28);
+      }
+      #${OVERLAY_ID} .rv-search-results {
+        min-height: 104px;
+      }
+      #${OVERLAY_ID} .rv-search-results.is-hidden {
+        display: none;
       }
       #${OUTPUT_ID} .rv-output-split {
         min-height: 0;
@@ -455,9 +542,76 @@
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const value = textarea.value;
-    textarea.value = `${value.slice(0, start)}  ${value.slice(end)}`;
-    textarea.selectionStart = start + 2;
-    textarea.selectionEnd = start + 2;
+    const indent = '  ';
+
+    if (start === end) {
+      textarea.value = `${value.slice(0, start)}${indent}${value.slice(end)}`;
+      textarea.selectionStart = start + indent.length;
+      textarea.selectionEnd = start + indent.length;
+      return;
+    }
+
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const selectionEnd = end > lineStart && value[end - 1] === '\n' ? end - 1 : end;
+    const lineEnd = value.indexOf('\n', selectionEnd);
+    const blockEnd = lineEnd === -1 ? value.length : lineEnd;
+    const block = value.slice(lineStart, blockEnd);
+    const lines = block.split('\n');
+    const indentedBlock = lines.map((line) => `${indent}${line}`).join('\n');
+
+    textarea.value = `${value.slice(0, lineStart)}${indentedBlock}${value.slice(blockEnd)}`;
+    textarea.selectionStart = start + indent.length;
+    textarea.selectionEnd = end + (indent.length * lines.length);
+  }
+
+  function removeTab(textarea) {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = textarea.value;
+    const indent = '  ';
+
+    if (start === end) {
+      const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+      const removable = value.startsWith(indent, lineStart)
+        ? indent.length
+        : (value[lineStart] === ' ' ? 1 : 0);
+      if (removable <= 0) {
+        return;
+      }
+      textarea.value = `${value.slice(0, lineStart)}${value.slice(lineStart + removable)}`;
+      const nextPos = Math.max(lineStart, start - removable);
+      textarea.selectionStart = nextPos;
+      textarea.selectionEnd = nextPos;
+      return;
+    }
+
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const selectionEnd = end > lineStart && value[end - 1] === '\n' ? end - 1 : end;
+    const lineEnd = value.indexOf('\n', selectionEnd);
+    const blockEnd = lineEnd === -1 ? value.length : lineEnd;
+    const block = value.slice(lineStart, blockEnd);
+    const lines = block.split('\n');
+
+    let removedBeforeStart = 0;
+    let removedTotal = 0;
+    const outdentedBlock = lines.map((line, index) => {
+      let removable = 0;
+      if (line.startsWith(indent)) {
+        removable = indent.length;
+      } else if (line.startsWith(' ')) {
+        removable = 1;
+      }
+      if (index === 0) {
+        const startOffset = start - lineStart;
+        removedBeforeStart = Math.min(removable, Math.max(0, startOffset));
+      }
+      removedTotal += removable;
+      return line.slice(removable);
+    }).join('\n');
+
+    textarea.value = `${value.slice(0, lineStart)}${outdentedBlock}${value.slice(blockEnd)}`;
+    textarea.selectionStart = Math.max(lineStart, start - removedBeforeStart);
+    textarea.selectionEnd = Math.max(textarea.selectionStart, end - removedTotal);
   }
 
   function waitForApi(attempt = 0) {
@@ -508,13 +662,24 @@
       <div class="rv-editor-wrap">
         <span class="rv-file-label" data-role="file-label">buildRailVisualSegment</span>
         <div class="rv-actions">
-          <button type="button" class="rv-primary" data-action="apply">適用</button>
-          <button type="button" class="rv-secondary" data-action="reload">現在値を再読込</button>
-          <button type="button" class="rv-danger" data-action="reset">初期値に戻す</button>
+          <div class="rv-action-row">
+            <button type="button" class="rv-primary" data-action="apply">適用</button>
+            <button type="button" class="rv-secondary" data-action="reload">現在値を再読込</button>
+            <button type="button" class="rv-danger" data-action="reset">初期値に戻す</button>
+          </div>
+          <div class="rv-search-stack">
+            <input class="rv-search-input" type="text" placeholder="コード検索" data-role="search-input">
+            <select class="rv-search-results" size="5" data-role="search-results">
+              <option value="">検索結果なし</option>
+            </select>
+          </div>
         </div>
         <div class="rv-editor-shell">
           <pre class="rv-line-numbers" data-role="line-numbers">1</pre>
-          <textarea spellcheck="false" data-role="code-editor"></textarea>
+          <div class="rv-editor-stage">
+            <pre class="rv-code-highlights" data-role="code-highlights"><code></code></pre>
+            <textarea spellcheck="false" data-role="code-editor"></textarea>
+          </div>
         </div>
       </div>
     `;
@@ -522,7 +687,10 @@
     const fileTabs = Array.from(panel.querySelectorAll('[data-file]'));
     const fileLabel = panel.querySelector('[data-role="file-label"]');
     const lineNumbers = panel.querySelector('[data-role="line-numbers"]');
+    const codeHighlights = panel.querySelector('[data-role="code-highlights"] code');
     const codeEditor = panel.querySelector('[data-role="code-editor"]');
+    const searchInput = panel.querySelector('[data-role="search-input"]');
+    const searchResults = panel.querySelector('[data-role="search-results"]');
     const draftSources = {
       buildRailVisualSegment: '',
       buildRailStripMesh: '',
@@ -541,11 +709,124 @@
       lineNumbers.scrollTop = codeEditor.scrollTop;
     }
 
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function renderHighlightedCode(source) {
+      const pattern = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|try|catch|throw|null|undefined)\b|\b(?:true|false)\b|\b\d+(?:\.\d+)?\b|===|!==|==|!=|<=|>=|=>|\+\+|--|\+=|-=|\*=|\/=|&&|\|\||[=+\-*/%<>!?:]|[()[\]{}])/g;
+      let result = '';
+      let lastIndex = 0;
+      let match = pattern.exec(source);
+
+      while (match) {
+        const [token] = match;
+        result += escapeHtml(source.slice(lastIndex, match.index));
+        let className = '';
+        if (/^(\/\*[\s\S]*?\*\/|\/\/[^\n]*)$/.test(token)) {
+          className = 'rv-token-comment';
+        } else if (/^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)$/.test(token)) {
+          className = 'rv-token-string';
+        } else if (/^(const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|try|catch|throw|null|undefined)$/.test(token)) {
+          className = 'rv-token-keyword';
+        } else if (/^(true|false)$/.test(token)) {
+          className = 'rv-token-boolean';
+        } else if (/^\d+(?:\.\d+)?$/.test(token)) {
+          className = 'rv-token-number';
+        } else if (/^[()[\]{}]$/.test(token)) {
+          className = 'rv-token-bracket';
+        } else {
+          className = 'rv-token-operator';
+        }
+        result += `<span class="${className}">${escapeHtml(token)}</span>`;
+        lastIndex = match.index + token.length;
+        match = pattern.exec(source);
+      }
+
+      result += escapeHtml(source.slice(lastIndex));
+      return result || ' ';
+    }
+
+    function updateHighlights() {
+      codeHighlights.innerHTML = renderHighlightedCode(codeEditor.value || ' ');
+      codeHighlights.parentElement.scrollTop = codeEditor.scrollTop;
+      codeHighlights.parentElement.scrollLeft = codeEditor.scrollLeft;
+    }
+
+    function findMatchingSearchLines(lines = codeEditor.value.split('\n')) {
+      const term = currentSearchTerm.trim().toLowerCase();
+      if (!term) {
+        return [];
+      }
+      return lines.flatMap((line, index) => (
+        line.toLowerCase().includes(term) ? [index] : []
+      ));
+    }
+
+    function updateSearchResults(lines = codeEditor.value.split('\n')) {
+      const matchingLines = findMatchingSearchLines(lines);
+      const selectedLine = Number(activeSearchResultLine || searchResults.value);
+
+      if (!currentSearchTerm.trim() || matchingLines.length === 0) {
+        activeSearchResultLine = 0;
+        searchResults.innerHTML = '<option value="">検索結果なし</option>';
+        searchResults.value = '';
+        searchResults.classList.toggle('is-hidden', !currentSearchTerm.trim());
+        return;
+      }
+
+      searchResults.classList.remove('is-hidden');
+      searchResults.innerHTML = matchingLines.map((lineIndex) => {
+        const lineText = lines[lineIndex].trim() || '(空行)';
+        const summary = lineText.length > 56 ? `${lineText.slice(0, 56)}...` : lineText;
+        return `<option value="${lineIndex + 1}">L${lineIndex + 1}: ${summary.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</option>`;
+      }).join('');
+
+      if (matchingLines.some((lineIndex) => lineIndex + 1 === selectedLine)) {
+        activeSearchResultLine = selectedLine;
+        searchResults.value = String(selectedLine);
+      } else {
+        activeSearchResultLine = 0;
+        searchResults.selectedIndex = 0;
+      }
+    }
+
+    function jumpToLine(lineNumber) {
+      const requestedLine = Number(lineNumber);
+      if (!Number.isInteger(requestedLine) || requestedLine < 1) {
+        return;
+      }
+
+      const lines = codeEditor.value.split('\n');
+      const targetLine = Math.min(requestedLine, lines.length);
+      const beforeText = lines.slice(0, targetLine - 1).join('\n');
+      const lineStart = beforeText.length === 0 ? 0 : beforeText.length + 1;
+      const lineText = lines[targetLine - 1] || '';
+      const lineEnd = lineStart + lineText.length;
+      const styles = window.getComputedStyle(codeEditor);
+      const lineHeight = Number.parseFloat(styles.lineHeight) || 17.05;
+      const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+      const targetTop = Math.max(0, paddingTop + lineHeight * (targetLine - 1) - (codeEditor.clientHeight / 2) + lineHeight);
+
+      activeSearchResultLine = targetLine;
+      searchResults.value = String(targetLine);
+      codeEditor.focus({ preventScroll: true });
+      codeEditor.setSelectionRange(lineStart, lineEnd);
+      codeEditor.scrollTop = targetTop;
+      lineNumbers.scrollTop = codeEditor.scrollTop;
+      updateLineNumbers();
+    }
+
     function loadSources(sourceSet) {
       draftSources.buildRailVisualSegment = sourceSet.buildRailVisualSegment || '';
       draftSources.buildRailStripMesh = sourceSet.buildRailStripMesh || '';
       codeEditor.value = draftSources[activeFile] || '';
       updateLineNumbers();
+      updateHighlights();
+      updateSearchResults();
     }
 
     function syncDraftFromEditor() {
@@ -561,6 +842,8 @@
       fileLabel.textContent = nextFile;
       codeEditor.value = draftSources[nextFile] || '';
       updateLineNumbers();
+      updateHighlights();
+      updateSearchResults();
       fileTabs.forEach((tab) => {
         tab.classList.toggle('is-active', tab.dataset.file === nextFile);
       });
@@ -590,6 +873,11 @@
     }
 
     function resetSources() {
+      const confirmed = window.confirm('編集中の buildRailVisualSegment / buildRailStripMesh を初期値へ戻します。よろしいですか？');
+      if (!confirmed) {
+        setStatus('初期値へのリセットをキャンセルしました。');
+        return;
+      }
       try {
         loadSources(runWithOutputCapture(() => api.resetSources()));
         setStatus('初期値へ戻しました。');
@@ -609,14 +897,29 @@
         return;
       }
       event.preventDefault();
-      insertTab(codeEditor);
+      if (event.shiftKey) {
+        removeTab(codeEditor);
+      } else {
+        insertTab(codeEditor);
+      }
       syncDraftFromEditor();
       updateLineNumbers();
     });
     codeEditor.addEventListener('input', syncDraftFromEditor);
     codeEditor.addEventListener('input', updateLineNumbers);
+    codeEditor.addEventListener('input', updateHighlights);
+    codeEditor.addEventListener('input', updateSearchResults);
     codeEditor.addEventListener('scroll', () => {
       lineNumbers.scrollTop = codeEditor.scrollTop;
+      updateHighlights();
+    });
+    searchInput.addEventListener('input', () => {
+      currentSearchTerm = searchInput.value;
+      activeSearchResultLine = 0;
+      updateSearchResults();
+    });
+    searchResults.addEventListener('change', () => {
+      jumpToLine(searchResults.value);
     });
     fileTabs.forEach((tab) => {
       tab.addEventListener('click', () => {
@@ -636,6 +939,25 @@
     });
     toggle.addEventListener('click', () => {
       setPanelsOpen(!panel.classList.contains('is-open'));
+    });
+    window.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+      if (event.key.toLowerCase() !== 'c') {
+        return;
+      }
+      const target = event.target;
+      const typingTarget = target instanceof HTMLElement && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      );
+      if (typingTarget) {
+        return;
+      }
+      toggle.click();
     });
 
     document.body.appendChild(toggle);
