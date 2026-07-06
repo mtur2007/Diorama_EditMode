@@ -1,4 +1,14 @@
 // main.js
+import {
+  buildRailSideReference,
+  detectRailIntersections,
+  getRailSideInfo,
+  getTrackReferenceFrame,
+  indexRailIntersectionsByRail,
+  sampleTrack,
+  summarizeRailIntersections,
+} from './rail_intersections.js';
+
 "toggle-daynight"
 "frontViewBtn"
 "停止"
@@ -25,6 +35,16 @@ const DAY_WORLD_BACKGROUND_PATH = DAY_SCENE_ENV_MAP_PATH;
 const NIGHT_WORLD_BACKGROUND_PATH = 'textures/images.png';
 const DAY_TRAIN_ENV_MAP_PATH = 'textures/skyy.jpg';
 const NIGHT_TRAIN_ENV_MAP_PATH = 'textures/shanghai_bund_4k.jpg';
+
+const railVisualEditorHelpers = Object.freeze({
+  buildRailSideReference,
+  detectRailIntersections,
+  getRailSideInfo,
+  getTrackReferenceFrame,
+  indexRailIntersectionsByRail,
+  sampleTrack,
+  summarizeRailIntersections,
+});
 
 function ensureTopNoticeElement() {
   if (topNoticeEl) { return topNoticeEl; }
@@ -630,9 +650,43 @@ const PERFORMANCE_QUALITY_OPTIONS = {
   medium: { label: '標準', pixelRatioScale: 1.0 },
   high: { label: '高', pixelRatioScale: 1.5 },
 };
+const SCENE_UBLD_OPACITY_STEPS = Object.freeze([0, 5, 7, 10, 20, 30, 40, 50, 60, 70, 80, 100]);
 const PERFORMANCE_DRAW_DISTANCE_MIN = 10;
 const PERFORMANCE_DRAW_DISTANCE_MAX = 300;
 const PERFORMANCE_DRAW_DISTANCE_STEP = 10;
+
+function normalizeSceneUbldOpacityStep(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return SCENE_UBLD_OPACITY_STEPS[SCENE_UBLD_OPACITY_STEPS.length - 1];
+  }
+  let closest = SCENE_UBLD_OPACITY_STEPS[0];
+  let minDiff = Math.abs(numeric - closest);
+  for (let i = 1; i < SCENE_UBLD_OPACITY_STEPS.length; i += 1) {
+    const stepValue = SCENE_UBLD_OPACITY_STEPS[i];
+    const diff = Math.abs(numeric - stepValue);
+    if (diff < minDiff) {
+      closest = stepValue;
+      minDiff = diff;
+    }
+  }
+  return closest;
+}
+
+function getSceneUbldOpacityStepIndex(value) {
+  const normalized = normalizeSceneUbldOpacityStep(value);
+  const index = SCENE_UBLD_OPACITY_STEPS.indexOf(normalized);
+  return index >= 0 ? index : SCENE_UBLD_OPACITY_STEPS.length - 1;
+}
+
+function getSceneUbldOpacityValueFromIndex(index) {
+  const numericIndex = Math.min(
+    SCENE_UBLD_OPACITY_STEPS.length - 1,
+    Math.max(0, Math.round(Number(index) || 0))
+  );
+  return SCENE_UBLD_OPACITY_STEPS[numericIndex];
+}
+
 function loadPerformanceSettings() {
   const fallback = { quality: 'medium', drawDistance: 200 };
   try {
@@ -671,9 +725,7 @@ function loadSceneVisibilitySettings() {
       showCityModel: parsed?.showCityModel !== false,
       showDifferenceLineOverlapPreview: false,
       showDifferenceSpaceLines: parsed?.showDifferenceSpaceLines !== false,
-      ubldOpacity: Number.isFinite(ubldOpacity)
-        ? Math.min(100, Math.max(0, ubldOpacity))
-        : fallback.ubldOpacity,
+      ubldOpacity: normalizeSceneUbldOpacityStep(Number.isFinite(ubldOpacity) ? ubldOpacity : fallback.ubldOpacity),
     };
   } catch (err) {
     console.warn('failed to load scene visibility settings', err);
@@ -12520,17 +12572,17 @@ function updateScenePanelUi() {
   updateScenePanelToggleButton(sceneToggleDifferenceSpaceLinesButton, sceneVisibilitySettings.showDifferenceSpaceLines !== false);
   updateScenePanelToggleButton(sceneToggleTrainMotionButton, !manualTrainAnimationPaused);
   if (sceneUbldOpacityRange) {
-    sceneUbldOpacityRange.value = String(Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0)));
+    sceneUbldOpacityRange.value = String(getSceneUbldOpacityStepIndex(sceneVisibilitySettings.ubldOpacity));
   }
   if (sceneUbldOpacityValue) {
-    sceneUbldOpacityValue.textContent = `${Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0))}`;
+    sceneUbldOpacityValue.textContent = `${normalizeSceneUbldOpacityStep(sceneVisibilitySettings.ubldOpacity)}`;
   }
 }
 
 function getEffectiveUbldOpacitySetting() {
-  const sceneOpacity = Math.min(100, Math.max(0, Number(sceneVisibilitySettings.ubldOpacity) || 0));
+  const sceneOpacity = normalizeSceneUbldOpacityStep(sceneVisibilitySettings.ubldOpacity);
   if (Number.isFinite(ubldOpacityButtonOverrideValue)) {
-    return Math.min(100, Math.max(0, Number(ubldOpacityButtonOverrideValue) || 0));
+    return normalizeSceneUbldOpacityStep(ubldOpacityButtonOverrideValue);
   }
   return sceneOpacity;
 }
@@ -12644,13 +12696,13 @@ sceneToggleDifferenceSpaceLinesButton?.addEventListener('click', () => {
   setMapLoadStatusText(`差分空間の線: ${sceneVisibilitySettings.showDifferenceSpaceLines ? 'ON' : 'OFF'}`);
 });
 sceneUbldOpacityRange?.addEventListener('input', () => {
-  const nextOpacity = Math.min(100, Math.max(0, Number(sceneUbldOpacityRange.value) || 0));
+  const nextOpacity = getSceneUbldOpacityValueFromIndex(sceneUbldOpacityRange.value);
   sceneVisibilitySettings.ubldOpacity = nextOpacity;
   ubldOpacityButtonOverrideValue = null;
   applySceneVisibilitySettings({ save: false });
 });
 sceneUbldOpacityRange?.addEventListener('change', () => {
-  const nextOpacity = Math.min(100, Math.max(0, Number(sceneUbldOpacityRange.value) || 0));
+  const nextOpacity = getSceneUbldOpacityValueFromIndex(sceneUbldOpacityRange.value);
   sceneVisibilitySettings.ubldOpacity = nextOpacity;
   ubldOpacityButtonOverrideValue = null;
   applySceneVisibilitySettings({ save: true });
@@ -14367,7 +14419,7 @@ function ensureRailVisualRoot() {
   return railVisualRoot;
 }
 
-function buildRailStripMesh(pointsData) {
+let buildRailStripMesh = function buildRailStripMesh(pointsData) {
   const points = Array.isArray(pointsData?.[0]) ? pointsData[0] : [];
   const angles = Array.isArray(pointsData?.[1]) ? pointsData[1] : [];
   if (points.length < 2 || angles.length < 1) { return null; }
@@ -14433,9 +14485,9 @@ function buildRailStripMesh(pointsData) {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'Rail';
   return mesh;
-}
+};
 
-function buildRailVisualSegment(track, segmentIndex) {
+let buildRailVisualSegment = function buildRailVisualSegment(track, segmentIndex) {
   const segmentPoints = buildRailTubeSegmentPoints(track, segmentIndex);
   if (!Array.isArray(segmentPoints) || segmentPoints.length < 2) { return null; }
   const group = new THREE.Group();
@@ -14533,7 +14585,7 @@ function buildRailVisualSegment(track, segmentIndex) {
     group.add(locatorMesh);
   }
   return group;
-}
+};
 
 function clearRailVisualTrackRuntime(trackName) {
   const key = String(trackName || '');
@@ -14619,6 +14671,109 @@ function rebuildAllRailVisualTracks() {
   ensureRailVisualRoot();
   railTrackDefs.forEach((track) => rebuildRailVisualTrack(track));
 }
+
+function wrapRailVisualEditorFunction(compiled, expectedName, source) {
+  if (typeof compiled !== 'function') {
+    return compiled;
+  }
+  const wrapped = function wrappedRailEditorFunction(...args) {
+    const hooks = window.__dioramaRailVisualEditorOutputHooks || null;
+    hooks?.beginCapture?.();
+    try {
+      return compiled.apply(this, args);
+    } finally {
+      hooks?.endCapture?.();
+    }
+  };
+  wrapped.__railEditorSource = source;
+  wrapped.__railEditorFunctionName = expectedName;
+  wrapped.toString = () => source;
+  return wrapped;
+}
+
+function compileRailVisualEditorFunction(source, expectedName) {
+  const text = String(source || '').trim();
+  if (!text) {
+    throw new Error(`${expectedName} のソースが空です。`);
+  }
+  const compiled = eval(`(${text})`);
+  if (typeof compiled !== 'function') {
+    throw new Error(`${expectedName} の評価結果が関数ではありません。`);
+  }
+  const actualName = String(compiled.name || '').trim();
+  if (actualName && actualName !== expectedName) {
+    console.warn('[rail-editor] function name mismatch', {
+      expectedName,
+      actualName,
+    });
+  }
+  return wrapRailVisualEditorFunction(compiled, expectedName, text);
+}
+
+function exposeRailVisualEditorApi() {
+  if (typeof window === 'undefined') { return; }
+  window.railVisualEditorHelpers = railVisualEditorHelpers;
+  const api = {
+    getSources() {
+      return {
+        buildRailStripMesh: buildRailStripMesh.__railEditorSource || buildRailStripMesh.toString(),
+        buildRailVisualSegment: buildRailVisualSegment.__railEditorSource || buildRailVisualSegment.toString(),
+      };
+    },
+    helpers: railVisualEditorHelpers,
+    applySources(nextSources = {}) {
+      if (typeof nextSources.buildRailStripMesh === 'string') {
+        buildRailStripMesh = compileRailVisualEditorFunction(
+          nextSources.buildRailStripMesh,
+          'buildRailStripMesh',
+        );
+      }
+      if (typeof nextSources.buildRailVisualSegment === 'string') {
+        buildRailVisualSegment = compileRailVisualEditorFunction(
+          nextSources.buildRailVisualSegment,
+          'buildRailVisualSegment',
+        );
+      }
+      if (railVisualRoot || railTubeMesh) {
+        rebuildAllRailVisualTracks();
+        if (railTubeMesh?.visible) {
+          setRailVisualRenderVisible(true);
+        }
+      }
+      return api.getSources();
+    },
+    resetSources() {
+      buildRailStripMesh = compileRailVisualEditorFunction(
+        api.defaultSources.buildRailStripMesh,
+        'buildRailStripMesh',
+      );
+      buildRailVisualSegment = compileRailVisualEditorFunction(
+        api.defaultSources.buildRailVisualSegment,
+        'buildRailVisualSegment',
+      );
+      if (railVisualRoot || railTubeMesh) {
+        rebuildAllRailVisualTracks();
+        if (railTubeMesh?.visible) {
+          setRailVisualRenderVisible(true);
+        }
+      }
+      return api.getSources();
+    },
+    rebuild() {
+      rebuildAllRailVisualTracks();
+      if (railTubeMesh?.visible) {
+        setRailVisualRenderVisible(true);
+      }
+    },
+  };
+  api.defaultSources = Object.freeze({
+    buildRailStripMesh: buildRailStripMesh.toString(),
+    buildRailVisualSegment: buildRailVisualSegment.toString(),
+  });
+  window.__dioramaRailVisualEditor = api;
+}
+
+exposeRailVisualEditorApi();
 
 function getRailTubeTrackColor(trackIndex) {
   return railTubeColors[trackIndex] ?? railTubeDefaultColor;
@@ -24548,10 +24703,75 @@ function restoreMaterialOpacity(material, { stateKey = 'opacityBaseState' } = {}
 
 function updateGroundOpacityButtonState() {
   if (!toggleGroundOpacityButton) { return; }
+  const state = getGroundDisplayState();
+  if (state === 'visible') {
+    toggleGroundOpacityButton.textContent = 'ground透過';
+    return;
+  }
+  if (state === 'transparent') {
+    toggleGroundOpacityButton.textContent = 'ground非表示';
+    return;
+  }
+  toggleGroundOpacityButton.textContent = 'ground表示';
+}
+
+function getGroundDisplayState() {
   const meshes = getAllGroundMeshes();
-  const materials = meshes.flatMap((mesh) => Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean);
+  if (meshes.length < 1) { return 'visible'; }
+  const visibleMeshes = meshes.filter((mesh) => mesh?.visible !== false);
+  if (visibleMeshes.length < 1) { return 'hidden'; }
+  const materials = visibleMeshes
+    .flatMap((mesh) => Array.isArray(mesh.material) ? mesh.material : [mesh.material])
+    .filter(Boolean);
   const isTransparent = materials.some((material) => typeof material?.opacity === 'number' && material.opacity < 0.99);
-  toggleGroundOpacityButton.textContent = isTransparent ? 'ground戻す' : 'ground透過';
+  return isTransparent ? 'transparent' : 'visible';
+}
+
+function applyGroundDisplayState(nextState) {
+  const meshes = getAllGroundMeshes();
+  if (meshes.length < 1) { return false; }
+  const materials = meshes.flatMap((mesh) => Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean);
+  if (nextState === 'visible') {
+    materials.forEach((material) => {
+      restoreMaterialOpacity(material, { stateKey: 'groundOpacityBaseState' });
+    });
+    meshes.forEach((mesh) => {
+      restoreMeshVisible(mesh, { stateKey: 'groundVisibleBaseState' });
+      restoreMeshRenderOrder(mesh, { stateKey: 'groundRenderOrderBaseState' });
+    });
+    applyRecommendedGroundSettings();
+    refreshDifferenceSpaceLayering();
+    updateGroundOpacityButtonState();
+    return true;
+  }
+  if (nextState === 'transparent') {
+    meshes.forEach((mesh) => {
+      setMeshVisible(mesh, true, { stateKey: 'groundVisibleBaseState' });
+      setMeshRenderOrder(mesh, 10, { stateKey: 'groundRenderOrderBaseState' });
+    });
+    materials.forEach((material) => {
+      setMaterialOpacity(material, 0.2, { stateKey: 'groundOpacityBaseState' });
+    });
+    applyRecommendedGroundSettings();
+    refreshDifferenceSpaceLayering();
+    updateGroundOpacityButtonState();
+    return true;
+  }
+  meshes.forEach((mesh) => {
+    restoreMaterialOpacityForGroundHidden(mesh);
+    setMeshVisible(mesh, false, { stateKey: 'groundVisibleBaseState' });
+    restoreMeshRenderOrder(mesh, { stateKey: 'groundRenderOrderBaseState' });
+  });
+  refreshDifferenceSpaceLayering();
+  updateGroundOpacityButtonState();
+  return true;
+}
+
+function restoreMaterialOpacityForGroundHidden(mesh) {
+  const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
+  materials.filter(Boolean).forEach((material) => {
+    restoreMaterialOpacity(material, { stateKey: 'groundOpacityBaseState' });
+  });
 }
 
 function updateUbldOpacityButtonState() {
@@ -24587,34 +24807,23 @@ function applyUbldOpacitySetting(opacityPercent) {
 }
 
 function toggleGroundOpacity() {
-  const meshes = getAllGroundMeshes();
-  if (meshes.length < 1) {
+  if (getAllGroundMeshes().length < 1) {
     setMapLoadStatusText('ground が見つかりません。');
     return false;
   }
-  const materials = meshes.flatMap((mesh) => Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean);
-  const shouldRestore = materials.some((material) => typeof material?.opacity === 'number' && material.opacity < 0.99);
-  materials.forEach((material) => {
-    if (shouldRestore) {
-      restoreMaterialOpacity(material, { stateKey: 'groundOpacityBaseState' });
-      return;
-    }
-    setMaterialOpacity(material, 0.3, { stateKey: 'groundOpacityBaseState' });
-  });
-  applyRecommendedGroundSettings();
-  meshes.forEach((mesh) => {
-    if (shouldRestore) {
-      restoreMeshRenderOrder(mesh, { stateKey: 'groundRenderOrderBaseState' });
-      return;
-    }
-    setMeshRenderOrder(mesh, 10, { stateKey: 'groundRenderOrderBaseState' });
-  });
-  refreshDifferenceSpaceLayering();
-  updateGroundOpacityButtonState();
+  const currentState = getGroundDisplayState();
+  const nextState = currentState === 'visible'
+    ? 'transparent'
+    : currentState === 'transparent'
+      ? 'hidden'
+      : 'visible';
+  applyGroundDisplayState(nextState);
   setMapLoadStatusText(
-    shouldRestore
-      ? `ground 表示を戻しました: ${meshes.length} 件`
-      : `ground を透過しました: ${meshes.length} 件`
+    nextState === 'visible'
+      ? 'ground を表示しました。'
+      : nextState === 'transparent'
+        ? 'ground を透過しました。'
+        : 'ground を非表示にしました。'
   );
   return true;
 }
@@ -42949,8 +43158,8 @@ function isInteractionAllowed(clientX, clientY){
   return pointInCanvas(clientX, clientY);
 }
 
-const PANEL_INPUT_ROOT_SELECTOR = '#rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #group-mode-panel, #construction-category-panel, #rail-construction-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #scene-panel, #performance-panel';
-const OVERLAY_UI_TARGET_SELECTOR = '#save-buttons, #show-instructions-btn, #demo-play-btn, #instructions-panel, #rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #construction-category-panel, #rail-construction-panel, #group-mode-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #performance-panel, #performance-toggle-btn, #scene-panel, #scene-toggle-btn, #create-mode-utility-buttons, #create-guide-y-button, #UiGroup, #frontViewButtons, #guide-window, #difference-auto-merge-toggle, #difference-copy-button, #logwindow';
+const PANEL_INPUT_ROOT_SELECTOR = '#rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #group-mode-panel, #construction-category-panel, #rail-construction-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #scene-panel, #performance-panel, #rail-visual-editor-overlay, #rail-visual-editor-output';
+const OVERLAY_UI_TARGET_SELECTOR = '#save-buttons, #show-instructions-btn, #demo-play-btn, #instructions-panel, #rotation-panel, #difference-panel, #difference-target-panel, #difference-face-panel, #area-structure-panel, #construction-category-panel, #rail-construction-panel, #group-mode-panel, #group-point-edit-mode-panel, #difference-area-selection-panel, #train-panel, #area-visibility-panel, #performance-panel, #performance-toggle-btn, #scene-panel, #scene-toggle-btn, #create-mode-utility-buttons, #create-guide-y-button, #UiGroup, #frontViewButtons, #guide-window, #difference-auto-merge-toggle, #difference-copy-button, #logwindow, #rail-visual-editor-overlay, #rail-visual-editor-output';
 const PANEL_INPUT_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [contenteditable]:not([contenteditable="false"])';
 
 function isPanelValueInputTarget(target) {
