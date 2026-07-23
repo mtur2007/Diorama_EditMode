@@ -892,6 +892,19 @@
   #rotation-panel {
     border: 1px solid rgba(170, 200, 250, 0.3);
   }
+  #style-material-editor-panel {
+    position: fixed;
+    top: 120px;
+    right: 254px;
+    width: 248px;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(170, 200, 250, 0.3);
+    background: rgba(248, 251, 255, 0.96);
+    box-shadow: 0 10px 24px rgba(18, 34, 58, 0.18);
+    z-index: 10002;
+    pointer-events: auto;
+  }
   #group-point-edit-mode-panel {
     border: 1px solid rgba(170, 200, 250, 0.34);
     backdrop-filter: blur(6px);
@@ -922,6 +935,41 @@
     font-size: 10px;
     line-height: 1.45;
     color: #546476;
+  }
+  #scale-edit-mode-panel {
+    border: 1px solid rgba(240, 182, 92, 0.34);
+    backdrop-filter: blur(6px);
+  }
+  #scale-edit-mode-panel .scale-edit-row {
+    display: grid;
+    grid-template-columns: 64px 1fr 1fr;
+    gap: 6px;
+    align-items: center;
+  }
+  #scale-edit-mode-panel .scale-edit-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #4a3210;
+    white-space: nowrap;
+  }
+  #scale-edit-mode-panel .scale-edit-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+    border-radius: 8px;
+    border: 1px solid #d8c19e;
+    background: #ffffff;
+    color: #6a5330;
+    cursor: pointer;
+  }
+  #scale-edit-mode-panel .scale-edit-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  #scale-edit-mode-panel .scale-edit-caption {
+    margin-top: 8px;
+    font-size: 10px;
+    line-height: 1.45;
+    color: #6a5a42;
   }
   #difference-area-selection-panel {
     border: 1px solid rgba(170, 200, 250, 0.34);
@@ -1910,6 +1958,7 @@
     #structure-generation-list-panel,
     #group-mode-panel,
     #group-point-edit-mode-panel,
+    #scale-edit-mode-panel,
     #train-panel,
     #area-visibility-panel,
     #guide-window,
@@ -1928,6 +1977,7 @@
     #structure-generation-list-panel,
     #group-mode-panel,
     #group-point-edit-mode-panel,
+    #scale-edit-mode-panel,
     #train-panel,
     #area-visibility-panel {
       top: 126px !important;
@@ -1958,6 +2008,7 @@
     #group-mode-panel button,
     #group-mode-panel select,
     #group-point-edit-mode-panel button,
+    #scale-edit-mode-panel button,
     #train-panel button,
     #train-panel input,
     #train-panel select,
@@ -1990,6 +2041,14 @@
       width: 34px;
       height: 34px;
       border-radius: 10px;
+    }
+    #style-material-editor-panel {
+      left: 12px !important;
+      right: 12px !important;
+      top: calc(126px + 320px) !important;
+      width: auto !important;
+      max-width: none !important;
+      box-sizing: border-box;
     }
     #difference-unify-button,
     #rail-construction-snap-pins-button,
@@ -2163,6 +2222,13 @@
                     <button id="move-point-coordinate-world" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #9eb7db; background:#eaf2ff; color:#1f3658; border-radius:6px;">World</button>
                     <button id="move-point-coordinate-grid" type="button" style="padding:4px 6px; font-size:11px; border:1px solid #b8d7c0; background:#eefcf3; color:#1d5a33; border-radius:6px;">Grid</button>
                   </div>
+                  <div id="move-point-guide-picker-row" style="display:none; margin-top:6px;">
+                    <div style="font-size:10px; color:#2a3442; margin-bottom:4px;">Guide Grid</div>
+                    <div style="display:grid; grid-template-columns:auto 1fr; gap:6px; align-items:center;">
+                      <button id="move-point-guide-picker-btn" type="button" style="padding:4px 8px; font-size:11px; border:1px solid #d1ba8b; background:#fff8ea; color:#6a4a10; border-radius:6px; white-space:nowrap;">選択</button>
+                      <div id="move-point-guide-picker-status" style="min-height:26px; padding:4px 6px; font-size:10px; color:#5a4a2d; border:1px solid #e0d3b8; background:#fffdfa; border-radius:6px; display:flex; align-items:center;">自動</div>
+                    </div>
+                  </div>
                 </div>
                 <div id="copy-target-mode" style="display:none; margin-bottom:8px;">
                   <div style="font-size:10px; color:#2a3442; margin-bottom:4px;">Copy Target</div>
@@ -2247,11 +2313,69 @@
                     </div>
                   </label>
                 </div>
+                <div id="style-appearance-panel" style="display:none; margin-top: 8px; padding: 8px; border-radius: 8px; border: 1px solid rgba(96, 126, 170, 0.28); background: rgba(236, 243, 252, 0.92);">
+                  <div style="font-size: 11px; font-weight: 700; color: #223448; margin-bottom: 6px;">材質スタイル</div>
+                  <label style="display:block; font-size: 11px; color: #37516f; margin-bottom: 8px;">使用マテリアル
+                    <select id="style-material-select" style="margin-top: 4px; width: 100%; padding: 5px 6px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">
+                      <option value="">未選択</option>
+                    </select>
+                  </label>
+                  <div id="style-environment-note" style="margin-top: 6px; font-size: 10px; color: #516983;">環境はUIのみです。現時点では見た目へ反映しません。</div>
+                  <div style="display:grid; grid-template-columns: 1fr; gap: 6px; margin-top: 8px;">
+                    <button id="style-material-editor-open" type="button" style="padding: 6px 8px; border: 1px solid #91b2d8; border-radius: 6px; background: #e9f2ff;">材質定義を開く</button>
+                  </div>
+                </div>
                 <button id="rotation-apply" style="margin-top: 8px; width: 100%; padding: 6px 8px;">適用</button>
                 <button id="difference-copy-button" type="button" style="margin-top: 8px; width: 100%; padding: 6px 8px; display: none;">選択空間を複製</button>
                 <button id="rotation-decoration-zero-base" type="button" style="margin-top: 8px; width: 100%; padding: 6px 8px; display: none;">現在姿勢を0度基準にする</button>
                 <button id="difference-unify-button" type="button" style="margin-top: 8px; width: 100%; padding: 6px 8px; display: none;">高品質一体化</button>
                 <pre id="rotation-selection-info" style="margin-top: 8px; max-height: 180px; overflow: auto; padding: 6px; border-radius: 6px; background: rgba(14,20,30,0.78); color: #eef4ff; border: 1px solid rgba(150,180,230,0.3); font-size: 10px; line-height: 1.45; white-space: pre-wrap;">選択点: 2点以上で情報を表示</pre>
+              </div>
+
+              <div id="style-material-editor-panel" role="region" aria-label="材質定義パネル" style="display:none;">
+                <div style="font-size: 11px; font-weight: 700; color: #223448; margin-bottom: 6px;">材質定義</div>
+                <label style="display:block; font-size: 11px; color: #37516f; margin-bottom: 8px;">マテリアル名
+                  <input id="style-material-name" type="text" maxlength="48" placeholder="Steel Standard" style="margin-top: 4px; width: 100%; padding: 6px 8px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">
+                </label>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+                  <button id="style-material-new" type="button" style="padding: 6px 8px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">新規</button>
+                  <button id="style-material-save" type="button" style="padding: 6px 8px; border: 1px solid #91b2d8; border-radius: 6px; background: #e9f2ff;">保存/更新</button>
+                  <button id="style-material-editor-close" type="button" style="padding: 6px 8px; border: 1px solid #c5d3e2; border-radius: 6px; background: #fff;">閉じる</button>
+                </div>
+                <div style="margin-bottom: 8px;">
+                  <div style="font-size: 11px; color: #37516f; margin-bottom: 4px;">プレビュー</div>
+                  <canvas id="style-material-preview" width="180" height="120" style="display:block; width:100%; height:120px; border:1px solid #b7c9de; border-radius:8px; background: radial-gradient(circle at 50% 30%, rgba(255,255,255,0.94), rgba(210,224,240,0.9));"></canvas>
+                </div>
+                <label style="display:block; font-size: 11px; color: #37516f; margin-bottom: 8px;">色
+                  <input id="style-material-color" type="color" value="#9da2a1" style="margin-top: 4px; width: 100%; height: 34px; padding: 2px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">
+                </label>
+                <label style="display:block; font-size: 11px; color: #37516f; margin-bottom: 8px;">質感
+                  <div style="display:grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 4px;">
+                    <input id="style-material-gloss" type="range" min="0" max="100" step="1" value="70">
+                    <span id="style-material-gloss-value" style="min-width: 42px; text-align: right; color: #24415f;">70%</span>
+                  </div>
+                </label>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                  <label style="display:block; font-size: 11px; color: #37516f;">昼 環境
+                    <select id="style-env-day" style="margin-top: 4px; width: 100%; padding: 5px 6px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">
+                      <option value="">未指定</option>
+                      <option value="outdoor_day">屋外 昼</option>
+                      <option value="outdoor_cloudy">屋外 曇天</option>
+                      <option value="indoor_a">室内 A</option>
+                      <option value="indoor_b">室内 B</option>
+                    </select>
+                  </label>
+                  <label style="display:block; font-size: 11px; color: #37516f;">夜 環境
+                    <select id="style-env-night" style="margin-top: 4px; width: 100%; padding: 5px 6px; border: 1px solid #b7c9de; border-radius: 6px; background: #fff;">
+                      <option value="">未指定</option>
+                      <option value="outdoor_night">屋外 夜</option>
+                      <option value="outdoor_evening">屋外 夕景</option>
+                      <option value="indoor_a_night">室内 A 夜</option>
+                      <option value="indoor_b_night">室内 B 夜</option>
+                    </select>
+                  </label>
+                </div>
+                <div style="margin-top: 6px; font-size: 10px; color: #516983;">ここでは材質定義だけを保存します。beam への割り当ては左のスタイルパネルで行います。</div>
               </div>
 
               <div id="group-point-edit-mode-panel" role="region" aria-label="グループ編集モード" style="position: fixed; right: 20px; bottom: 20px; width: 250px; padding: 12px; background: rgba(255,255,255,0.92); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.22); z-index: 10002; display: none; pointer-events: auto;">
@@ -2267,6 +2391,20 @@
                   <button id="copied-group-point-detach" type="button" class="group-point-edit-btn">独立</button>
                 </div>
                 <div class="group-point-edit-caption">通常グループの「部分」は何も追加処理をせず、そのまま編集します。複製グループの「独立」は確認ウィンドウなしで独立化します。</div>
+              </div>
+              <div id="scale-edit-mode-panel" role="region" aria-label="スケール編集モード" style="position: fixed; right: 290px; bottom: 20px; width: 250px; padding: 12px; background: rgba(255,250,242,0.94); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.22); z-index: 10002; display: none; pointer-events: auto;">
+                <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: #6a4308;">スケール設定</div>
+                <div class="scale-edit-row" style="margin-bottom: 8px;">
+                  <div class="scale-edit-label">方向</div>
+                  <button id="scale-mode-uniform" type="button" class="scale-edit-btn">全体</button>
+                  <button id="scale-mode-directional" type="button" class="scale-edit-btn">指向</button>
+                </div>
+                <div class="scale-edit-row">
+                  <div class="scale-edit-label">対象</div>
+                  <button id="scale-target-position" type="button" class="scale-edit-btn">位置</button>
+                  <button id="scale-target-style" type="button" class="scale-edit-btn">スタイル</button>
+                </div>
+                <div class="scale-edit-caption">全体は一律倍率、指向はギズモ方向で拡縮します。スタイルは roll を除く XYZ を対象にします。</div>
               </div>
               <div id="difference-area-selection-panel" role="region" aria-label="Difference Area 選択モード" style="position: fixed; right: 20px; bottom: 144px; width: 250px; padding: 12px; background: rgba(255,255,255,0.92); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.22); z-index: 10002; display: none; pointer-events: auto;">
                 <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; color: #223448;">空間選択</div>
@@ -2323,6 +2461,10 @@
                   <button class="construction-card" data-construction-profile="tube" type="button" aria-pressed="false">
                     <img alt="補間チューブ" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M8 44 C26 18, 44 58, 62 32 C78 10, 96 48, 112 24' fill='none' stroke='%2388a4c2' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M8 44 C26 18, 44 58, 62 32 C78 10, 96 48, 112 24' fill='none' stroke='%23dfeaf7' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
                     <span>補間チューブ</span>
+                  </button>
+                  <button class="construction-card" data-construction-profile="rect_tube" type="button" aria-pressed="false">
+                    <img alt="補間角チューブ" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Cpath d='M10 46 C26 18, 46 58, 62 30 C78 8, 98 48, 110 22' fill='none' stroke='%2388a4c2' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 46 C26 18, 46 58, 62 30 C78 8, 98 48, 110 22' fill='none' stroke='%23eef4ff' stroke-width='4' stroke-linecap='butt' stroke-linejoin='miter'/%3E%3C/svg%3E">
+                    <span>補間角チューブ</span>
                   </button>
                   <button class="construction-card" data-construction-profile="panel_wall" type="button" aria-pressed="false">
                     <img alt="仮囲い壁" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 72'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23f9fbff'/%3E%3Cstop offset='100%25' stop-color='%23e9eef4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='120' height='72' fill='%23eef4ff'/%3E%3Crect x='15' y='10' width='90' height='52' rx='3' fill='url(%23g)' stroke='%23c8d3df' stroke-width='2'/%3E%3Cline x1='15' y1='23' x2='105' y2='23' stroke='%23d7e0e8'/%3E%3Cline x1='15' y1='36' x2='105' y2='36' stroke='%23d7e0e8'/%3E%3Cline x1='15' y1='49' x2='105' y2='49' stroke='%23d7e0e8'/%3E%3C/svg%3E">

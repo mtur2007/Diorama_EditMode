@@ -36,6 +36,7 @@ export function createMovePointSpaceHelpers({
 
   function getMovePointGridFrameForMesh(mesh) {
     const planeRef = mesh?.userData?.planeRef;
+    const meshMirrorFrame = readGuideMirrorCoordFrame(mesh?.userData?.guideMirrorCoordFrame);
 
     const selectedMirrorFrame = readGuideMirrorCoordFrame(getGuideCoordinateFrameOverride?.())
       || readGuideMirrorCoordFrame(getChangeAngleGridTarget?.()?.userData?.guideMirrorCoordFrame);
@@ -43,9 +44,24 @@ export function createMovePointSpaceHelpers({
       return selectedMirrorFrame;
     }
 
+    if (meshMirrorFrame) {
+      return meshMirrorFrame;
+    }
+
     const mirrorFrame = readGuideMirrorCoordFrame(planeRef?.userData?.guideMirrorCoordFrame);
     if (mirrorFrame) {
       return mirrorFrame;
+    }
+    if (mesh?.quaternion?.isQuaternion && mesh?.position?.isVector3) {
+      const isGuideGrid = mesh?.userData?.guideGridDisplay === 'grid'
+        || mesh?.userData?.guideGridDisplay === 'plane'
+        || String(mesh?.name || '').includes('GuideGrid');
+      if (isGuideGrid) {
+        return {
+          anchor: mesh.position.clone(),
+          quat: mesh.quaternion.clone().normalize(),
+        };
+      }
     }
     if (!planeRef?.quaternion?.isQuaternion) { return null; }
     const anchor = planeRef?.position ? planeRef.position.clone() : new THREE.Vector3(0, 0, 0);

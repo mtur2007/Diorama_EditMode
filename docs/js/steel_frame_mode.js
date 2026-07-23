@@ -17,13 +17,81 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
   let generated = false;
   let allowPointAppend = false;
   const createPointScale = 0.1;
+  let materialReferenceResolver = null;
   let forcedCreatEnvMap = null;
   const BEAM_BASE_COLOR = 0x9DA2A1;
+  const DEFAULT_MATERIAL_GLOSS = 0.7;
   const MIN_STYLE_DIMENSION = 0.001;
   const MIN_STYLE_RADIUS = MIN_STYLE_DIMENSION * 0.5;
+  const POINT_SECTION_STYLE_KEYS = Object.freeze({
+    width: 'steelFrameSectionWidthX',
+    height: 'steelFrameSectionHeightY',
+    radius: 'steelFrameSectionRadiusZ',
+    roll: 'steelFrameSectionRollDeg',
+  });
 
   function getDefaultPointColor(mesh) {
     return mesh?.userData?.steelFrameCopied ? copiedPointColor : pointColor;
+  }
+
+  function resolveMaterialReferenceAppearance(materialRefId = '') {
+    const key = String(materialRefId || '').trim();
+    if (!key || typeof materialReferenceResolver !== 'function') { return null; }
+    const resolved = materialReferenceResolver(key);
+    if (!resolved || typeof resolved !== 'object') { return null; }
+    return {
+      color: Number.isFinite(Number(resolved?.color))
+        ? Math.max(0, Math.min(0xffffff, Math.round(Number(resolved.color))))
+        : BEAM_BASE_COLOR,
+      gloss: Number.isFinite(Number(resolved?.gloss))
+        ? THREE.MathUtils.clamp(Number(resolved.gloss), 0, 1)
+        : DEFAULT_MATERIAL_GLOSS,
+      envDayPreset: typeof resolved?.envDayPreset === 'string' ? resolved.envDayPreset.trim() : '',
+      envNightPreset: typeof resolved?.envNightPreset === 'string' ? resolved.envNightPreset.trim() : '',
+    };
+  }
+
+  function resolveBeamAppearance(style = null) {
+    const materialRefId = String(style?.materialRefId || '').trim();
+    const referenced = resolveMaterialReferenceAppearance(materialRefId);
+    if (referenced) {
+      return {
+        materialRefId,
+        materialColor: referenced.color,
+        materialGloss: referenced.gloss,
+        envDayPreset: referenced.envDayPreset,
+        envNightPreset: referenced.envNightPreset,
+      };
+    }
+    return {
+      materialRefId,
+      materialColor: Number.isFinite(Number(style?.materialColor))
+        ? Math.max(0, Math.min(0xffffff, Math.round(Number(style.materialColor))))
+        : BEAM_BASE_COLOR,
+      materialGloss: Number.isFinite(Number(style?.materialGloss))
+        ? THREE.MathUtils.clamp(Number(style.materialGloss), 0, 1)
+        : DEFAULT_MATERIAL_GLOSS,
+      envDayPreset: typeof style?.envDayPreset === 'string' ? style.envDayPreset.trim() : '',
+      envNightPreset: typeof style?.envNightPreset === 'string' ? style.envNightPreset.trim() : '',
+    };
+  }
+
+  function compactBeamStyleForStorage(style = null) {
+    if (!style || typeof style !== 'object') { return null; }
+    const next = {
+      beamWidthHorizontal: Number(style.beamWidthHorizontal),
+      beamHeightVertical: Number(style.beamHeightVertical),
+      beamThickness: Number(style.beamThickness),
+      beamRollDeg: Number(style.beamRollDeg),
+      materialRefId: typeof style.materialRefId === 'string' ? style.materialRefId.trim() : '',
+    };
+    const out = {};
+    if (Number.isFinite(next.beamWidthHorizontal)) { out.beamWidthHorizontal = next.beamWidthHorizontal; }
+    if (Number.isFinite(next.beamHeightVertical)) { out.beamHeightVertical = next.beamHeightVertical; }
+    if (Number.isFinite(next.beamThickness)) { out.beamThickness = next.beamThickness; }
+    if (Number.isFinite(next.beamRollDeg)) { out.beamRollDeg = THREE.MathUtils.clamp(next.beamRollDeg, -180, 180); }
+    if (next.materialRefId) { out.materialRefId = next.materialRefId; }
+    return out;
   }
 
   const envLoader = new THREE.TextureLoader();
@@ -35,23 +103,30 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     // Keep non-rite generated meshes on the fixed env map.
     segmentMeshes.forEach((obj) => {
       if (!obj || !obj.traverse) { return; }
-      obj.traverse((node) => {
-        const mat = node.material;
-        if (!mat || mat.type !== 'MeshStandardMaterial') { return; }
-        mat.envMap = forcedCreatEnvMap;
-        mat.envMapIntensity = 1.0;
-        mat.needsUpdate = true;
-      });
+      const profile = String(obj?.userData?.steelFrameSegmentProfile || '').toLowerCase();
+      if (profile === 'tubular') { return; }
+      const style = normalizeBeamStyle(profile || segmentProfile, obj?.userData?.steelFrameSegmentStyle || null);
+      applyMaterialStyleToObject(obj, style);
     });
   });
 
-  function createCreatStandardMaterial(color = BEAM_BASE_COLOR) {
+  function resolveMaterialParams(gloss = DEFAULT_MATERIAL_GLOSS) {
+    const g = THREE.MathUtils.clamp(Number.isFinite(Number(gloss)) ? Number(gloss) : DEFAULT_MATERIAL_GLOSS, 0, 1);
+    return {
+      metalness: THREE.MathUtils.lerp(0.08, 0.92, g),
+      roughness: THREE.MathUtils.lerp(0.92, 0.22, g),
+      envMapIntensity: THREE.MathUtils.lerp(0.35, 1.35, g),
+    };
+  }
+
+  function createCreatStandardMaterial(color = BEAM_BASE_COLOR, gloss = DEFAULT_MATERIAL_GLOSS) {
+    const materialParams = resolveMaterialParams(gloss);
     return new THREE.MeshStandardMaterial({
       color,
-      metalness: 0.85,
-      roughness: 0.35,
+      metalness: materialParams.metalness,
+      roughness: materialParams.roughness,
       envMap: forcedCreatEnvMap,
-      envMapIntensity: 1.0,
+      envMapIntensity: materialParams.envMapIntensity,
     });
   }
   let segmentProfile = 'round';
@@ -74,9 +149,9 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         beamThickness: 0.08,
       };
     }
-    if (p === 'rect_bar') {
+    if (p === 'rect_bar' || p === 'rect_tube') {
       return {
-        // rect_bar: X=幅, Y=高さ, Z=角丸半径(R)
+        // rect_bar / rect_tube: X=幅, Y=高さ, Z=角丸半径(R)
         beamWidthHorizontal: 0.28,
         beamHeightVertical: 0.28,
         beamThickness: 0.0,
@@ -147,6 +222,24 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       beamHeightVertical: Number(rawStyle?.beamHeightVertical),
       beamThickness: Number(rawStyle?.beamThickness),
       beamRollDeg: Number(rawStyle?.beamRollDeg),
+      materialRefId: typeof rawStyle?.materialRefId === 'string' ? rawStyle.materialRefId.trim() : '',
+      materialColor: Number(rawStyle?.materialColor),
+      materialGloss: Number(rawStyle?.materialGloss),
+      envDayPreset: typeof rawStyle?.envDayPreset === 'string' ? rawStyle.envDayPreset.trim() : '',
+      envNightPreset: typeof rawStyle?.envNightPreset === 'string' ? rawStyle.envNightPreset.trim() : '',
+    };
+    const appendAppearance = (styleObject) => {
+      if (!styleObject || typeof styleObject !== 'object') { return styleObject; }
+      styleObject.materialRefId = merged.materialRefId || '';
+      styleObject.materialColor = Number.isFinite(merged.materialColor)
+        ? Math.max(0, Math.min(0xffffff, Math.round(merged.materialColor)))
+        : BEAM_BASE_COLOR;
+      styleObject.materialGloss = Number.isFinite(merged.materialGloss)
+        ? THREE.MathUtils.clamp(merged.materialGloss, 0, 1)
+        : DEFAULT_MATERIAL_GLOSS;
+      styleObject.envDayPreset = merged.envDayPreset || '';
+      styleObject.envNightPreset = merged.envNightPreset || '';
+      return styleObject;
     };
     if (p === 'tubular' || p === 'tube') {
       const diameterRaw = Number.isFinite(merged.beamWidthHorizontal)
@@ -157,11 +250,11 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
             ? merged.beamHeightVertical
             : base.beamWidthHorizontal));
       const diameter = Math.max(MIN_STYLE_DIMENSION, diameterRaw);
-      return {
+      return appendAppearance({
         beamWidthHorizontal: diameter,
         beamHeightVertical: diameter,
         beamThickness: diameter,
-      };
+      });
     }
     const width = Number.isFinite(merged.beamWidthHorizontal) ? Math.max(MIN_STYLE_DIMENSION, merged.beamWidthHorizontal) : base.beamWidthHorizontal;
     if (p === 'corrugated_bar') {
@@ -171,57 +264,57 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         // 旧データ(板厚)との互換: 低すぎる値は波密度既定値に寄せる
         densityRaw = base.beamThickness;
       }
-      return {
+      return appendAppearance({
         beamWidthHorizontal: width,
         beamHeightVertical: THREE.MathUtils.clamp(waveHeightRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.9)),
         beamThickness: THREE.MathUtils.clamp(densityRaw, 0.5, 24),
         beamRollDeg: Number.isFinite(merged.beamRollDeg)
           ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
           : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
-      };
+      });
     }
     if (p === 'truss_column' || p === 'truss_ladder') {
       const panelLenRaw = Number.isFinite(merged.beamHeightVertical) ? merged.beamHeightVertical : base.beamHeightVertical;
       const memberRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
-      return {
+      return appendAppearance({
         beamWidthHorizontal: width,
         beamHeightVertical: Math.max(0.08, panelLenRaw),
         beamThickness: THREE.MathUtils.clamp(memberRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.35)),
         beamRollDeg: Number.isFinite(merged.beamRollDeg)
           ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
           : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
-      };
+      });
     }
     if (p === 'truss_catenary') {
       const panelLenRaw = Number.isFinite(merged.beamHeightVertical) ? merged.beamHeightVertical : base.beamHeightVertical;
       const memberRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
-      return {
+      return appendAppearance({
         beamWidthHorizontal: Math.max(MIN_STYLE_DIMENSION, width),
         beamHeightVertical: Math.max(0.04, panelLenRaw),
         beamThickness: THREE.MathUtils.clamp(memberRaw, MIN_STYLE_DIMENSION, Math.max(MIN_STYLE_DIMENSION, width * 0.4)),
         beamRollDeg: Number.isFinite(merged.beamRollDeg)
           ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
           : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0),
-      };
+      });
     }
     if (p === 'panel_wall') {
       const targetLen = Number.isFinite(merged.beamWidthHorizontal) ? Math.max(0.2, merged.beamWidthHorizontal) : base.beamWidthHorizontal;
       const wallHeight = Number.isFinite(merged.beamHeightVertical) ? Math.max(0.5, merged.beamHeightVertical) : base.beamHeightVertical;
       const thickness = Number.isFinite(merged.beamThickness) ? THREE.MathUtils.clamp(merged.beamThickness, MIN_STYLE_DIMENSION, 0.05) : base.beamThickness;
-      return {
+      return appendAppearance({
         beamWidthHorizontal: targetLen,
         beamHeightVertical: wallHeight,
         beamThickness: thickness,
-      };
+      });
     }
     const height = Number.isFinite(merged.beamHeightVertical) ? Math.max(MIN_STYLE_DIMENSION, merged.beamHeightVertical) : base.beamHeightVertical;
-    const maxThickness = (p === 'rect_bar')
+    const maxThickness = (p === 'rect_bar' || p === 'rect_tube')
       ? Math.max(0, Math.min(width, height) * 0.5)
       : Math.max(MIN_STYLE_DIMENSION, Math.min(width, height) * 0.45);
     const thicknessRaw = Number.isFinite(merged.beamThickness) ? merged.beamThickness : base.beamThickness;
     const thickness = THREE.MathUtils.clamp(
       thicknessRaw,
-      p === 'rect_bar' ? 0 : MIN_STYLE_DIMENSION,
+      (p === 'rect_bar' || p === 'rect_tube') ? 0 : MIN_STYLE_DIMENSION,
       maxThickness,
     );
     const next = {
@@ -229,12 +322,12 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       beamHeightVertical: height,
       beamThickness: thickness,
     };
-    if (p === 'rect_bar' || p === 'h_beam' || p === 't_beam' || p === 'l_beam') {
+    if (p === 'rect_bar' || p === 'rect_tube' || p === 'h_beam' || p === 't_beam' || p === 'l_beam') {
       next.beamRollDeg = Number.isFinite(merged.beamRollDeg)
         ? THREE.MathUtils.clamp(merged.beamRollDeg, -180, 180)
         : (Number.isFinite(base.beamRollDeg) ? base.beamRollDeg : 0);
     }
-    return next;
+    return appendAppearance(next);
   }
 
   function applyLocalZRoll(object3d, rollDeg) {
@@ -245,6 +338,79 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       THREE.MathUtils.degToRad(deg),
     );
     object3d.quaternion.multiply(rollQuat).normalize();
+  }
+
+  function computeStableCurveFrames(curve, segmentCount) {
+    const count = Math.max(1, Number(segmentCount) || 1);
+    const tangents = [];
+    const normals = [];
+    const binormals = [];
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const fallbackAxes = [
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(1, 0, 0),
+    ];
+    const projectReferenceToTangentPlane = (reference, tangent) => {
+      const projected = reference.clone().projectOnPlane(tangent);
+      if (projected.lengthSq() > 1e-10) {
+        return projected.normalize();
+      }
+      return null;
+    };
+
+    for (let i = 0; i <= count; i += 1) {
+      tangents.push(curve.getTangentAt(i / count).normalize());
+    }
+    const resolveFrameFromUp = (tangent, prevNormal = null, prevBinormal = null) => {
+      let upAxis = projectReferenceToTangentPlane(worldUp, tangent);
+      if (!upAxis && prevBinormal) {
+        upAxis = prevBinormal.clone().projectOnPlane(tangent);
+        if (upAxis.lengthSq() > 1e-10) {
+          upAxis.normalize();
+        } else {
+          upAxis = null;
+        }
+      }
+      if (!upAxis) {
+        for (let i = 0; i < fallbackAxes.length; i += 1) {
+          upAxis = projectReferenceToTangentPlane(fallbackAxes[i], tangent);
+          if (upAxis) { break; }
+        }
+      }
+      if (!upAxis) {
+        upAxis = new THREE.Vector3(0, 1, 0);
+      }
+      let normal = new THREE.Vector3().crossVectors(upAxis, tangent).normalize();
+      let binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
+      if (prevNormal && normal.dot(prevNormal) < 0) {
+        normal.multiplyScalar(-1);
+        binormal.multiplyScalar(-1);
+      } else if (!prevNormal && prevBinormal && binormal.dot(prevBinormal) < 0) {
+        normal.multiplyScalar(-1);
+        binormal.multiplyScalar(-1);
+      }
+      return { normal, binormal };
+    };
+
+    const firstFrame = resolveFrameFromUp(
+      tangents[0]?.clone?.() || new THREE.Vector3(0, 0, 1),
+      null,
+      null,
+    );
+    normals.push(firstFrame.normal);
+    binormals.push(firstFrame.binormal);
+
+    for (let i = 1; i <= count; i += 1) {
+      const nextFrame = resolveFrameFromUp(
+        tangents[i],
+        normals[i - 1],
+        binormals[i - 1],
+      );
+      normals.push(nextFrame.normal);
+      binormals.push(nextFrame.binormal);
+    }
+
+    return { tangents, normals, binormals };
   }
 
   function setMeshColorRecursive(obj, colorHex) {
@@ -265,8 +431,44 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     });
   }
 
+  function applyMaterialStyleToObject(obj, style = null) {
+    if (!obj || !style) { return; }
+    const appearance = resolveBeamAppearance(style);
+    const colorHex = appearance.materialColor;
+    const materialParams = resolveMaterialParams(appearance.materialGloss);
+    const applyToMaterial = (mat) => {
+      if (!mat || mat.type !== 'MeshStandardMaterial') { return; }
+      if (mat.color?.setHex) {
+        mat.color.setHex(colorHex);
+      }
+      mat.metalness = materialParams.metalness;
+      mat.roughness = materialParams.roughness;
+      mat.envMap = forcedCreatEnvMap;
+      mat.envMapIntensity = materialParams.envMapIntensity;
+      mat.needsUpdate = true;
+    };
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach((mat) => applyToMaterial(mat));
+    } else {
+      applyToMaterial(obj.material);
+    }
+    obj.traverse?.((node) => {
+      if (node === obj) { return; }
+      if (Array.isArray(node.material)) {
+        node.material.forEach((mat) => applyToMaterial(mat));
+      } else {
+        applyToMaterial(node.material);
+      }
+    });
+  }
+
   function applySegmentVisualState(mesh) {
     if (!mesh) { return; }
+    const profile = String(mesh?.userData?.steelFrameSegmentProfile || '').toLowerCase();
+    if (profile !== 'tubular') {
+      const style = normalizeBeamStyle(profile || segmentProfile, mesh?.userData?.steelFrameSegmentStyle || null);
+      applyMaterialStyleToObject(mesh, style);
+    }
     if (mesh?.userData?.steelFrameCopiedObject) {
       setMeshColorRecursive(mesh, 0xffd400);
     }
@@ -321,6 +523,76 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     );
     mesh.visible = active;
     return mesh;
+  }
+
+  function getPointSectionStyle(mesh, fallbackStyle = null) {
+    if (!mesh?.userData?.steelFramePoint) { return null; }
+    const base = normalizeBeamStyle('rect_tube', fallbackStyle) || normalizeBeamStyle('rect_tube', null);
+    return {
+      beamWidthHorizontal: Number.isFinite(Number(mesh.userData?.[POINT_SECTION_STYLE_KEYS.width]))
+        ? Math.max(MIN_STYLE_DIMENSION, Number(mesh.userData[POINT_SECTION_STYLE_KEYS.width]))
+        : Number(base?.beamWidthHorizontal) || 0.28,
+      beamHeightVertical: Number.isFinite(Number(mesh.userData?.[POINT_SECTION_STYLE_KEYS.height]))
+        ? Math.max(MIN_STYLE_DIMENSION, Number(mesh.userData[POINT_SECTION_STYLE_KEYS.height]))
+        : Number(base?.beamHeightVertical) || 0.28,
+      beamThickness: Number.isFinite(Number(mesh.userData?.[POINT_SECTION_STYLE_KEYS.radius]))
+        ? Math.max(0, Number(mesh.userData[POINT_SECTION_STYLE_KEYS.radius]))
+        : Math.max(0, Number(base?.beamThickness) || 0),
+      beamRollDeg: Number.isFinite(Number(mesh.userData?.[POINT_SECTION_STYLE_KEYS.roll]))
+        ? THREE.MathUtils.clamp(Number(mesh.userData[POINT_SECTION_STYLE_KEYS.roll]), -180, 180)
+        : THREE.MathUtils.clamp(Number(base?.beamRollDeg) || 0, -180, 180),
+    };
+  }
+
+  function applyPointSectionStyle(pointMeshes, stylePatch = {}, fallbackStyle = null) {
+    const targets = Array.from(new Set((Array.isArray(pointMeshes) ? pointMeshes : [])
+      .filter((mesh) => mesh?.userData?.steelFramePoint)));
+    if (targets.length < 1) {
+      return { updated: 0, rebuilt: 0, points: [], meshes: [] };
+    }
+    const touchedSegments = [];
+    let updated = 0;
+    targets.forEach((mesh) => {
+      const current = getPointSectionStyle(mesh, fallbackStyle);
+      if (!current) { return; }
+      const next = normalizeBeamStyle('rect_tube', {
+        beamWidthHorizontal: stylePatch.beamWidthHorizontal ?? current.beamWidthHorizontal,
+        beamHeightVertical: stylePatch.beamHeightVertical ?? current.beamHeightVertical,
+        beamThickness: stylePatch.beamThickness ?? current.beamThickness,
+        beamRollDeg: stylePatch.beamRollDeg ?? current.beamRollDeg,
+      });
+      if (!next) { return; }
+      mesh.userData = {
+        ...(mesh.userData || {}),
+        [POINT_SECTION_STYLE_KEYS.width]: Number(next.beamWidthHorizontal),
+        [POINT_SECTION_STYLE_KEYS.height]: Number(next.beamHeightVertical),
+        [POINT_SECTION_STYLE_KEYS.radius]: Number(next.beamThickness),
+        [POINT_SECTION_STYLE_KEYS.roll]: Number(next.beamRollDeg || 0),
+      };
+      segmentMeshes.forEach((seg) => {
+        if (!seg?.parent || seg?.userData?.steelFrameSegmentProfile !== 'rect_tube') { return; }
+        const refs = Array.isArray(seg?.userData?.steelFrameSegmentPointRefs)
+          ? seg.userData.steelFrameSegmentPointRefs
+          : [];
+        if (refs.includes(mesh) && !touchedSegments.includes(seg)) {
+          touchedSegments.push(seg);
+        }
+      });
+      updated += 1;
+    });
+    const rebuilt = Number(rebuildSegmentsForPoints(targets)) || 0;
+    return {
+      updated,
+      rebuilt,
+      points: targets,
+      meshes: touchedSegments.filter((mesh) => mesh?.parent),
+    };
+  }
+
+  function getPointSectionStylePatch(mesh, fallbackStyle = null) {
+    const current = getPointSectionStyle(mesh, fallbackStyle);
+    if (!current) { return null; }
+    return { ...current };
   }
 
   function createRoundedRectProfileShape(width, height, radius) {
@@ -686,6 +958,167 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     const dims = normalizeBeamStyle('tube', style);
     const radius = Math.max(MIN_STYLE_RADIUS, Number(dims?.beamWidthHorizontal || 0.14) * 0.5);
     const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 14, false);
+    const material = createCreatStandardMaterial(BEAM_BASE_COLOR);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = segmentName;
+    mesh.visible = active;
+    return mesh;
+  }
+
+  function createInterpolatedRectTubeSegmentMesh(pointMeshes, style = null) {
+    const refs = Array.isArray(pointMeshes) ? pointMeshes : [];
+    const controlEntries = [];
+    refs.forEach((mesh) => {
+      const point = mesh?.position?.clone?.() || null;
+      if (!point) { return; }
+      if (controlEntries.length > 0) {
+        const prev = controlEntries[controlEntries.length - 1];
+        if (point.distanceToSquared(prev.point) <= 1e-10) { return; }
+      }
+      controlEntries.push({
+        point,
+        style: getPointSectionStyle(mesh, style),
+      });
+    });
+    if (controlEntries.length < 2) { return null; }
+
+    const points = controlEntries.map((entry) => entry.point);
+    if (points.length < 2) { return null; }
+
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.5);
+    const controlStyles = controlEntries.map((entry) => entry.style).filter(Boolean);
+    let approxLen = 0;
+    const cumulativeDistances = [0];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      approxLen += points[i].distanceTo(points[i + 1]);
+      cumulativeDistances.push(approxLen);
+    }
+    const tubularSegments = THREE.MathUtils.clamp(Math.round(Math.max(approxLen * 20, points.length * 12)), 24, 960);
+    const fallbackStyleResolved = normalizeBeamStyle('rect_tube', style);
+    const resolveInterpolatedStyleAtDistance = (distance) => {
+      const styles = controlStyles.length === points.length
+        ? controlStyles
+        : points.map((_point, idx) => controlStyles[idx] || fallbackStyleResolved);
+      if (styles.length < 1) { return fallbackStyleResolved; }
+      if (styles.length === 1 || approxLen <= 1e-8) { return styles[0]; }
+      const clampedDistance = THREE.MathUtils.clamp(distance, 0, approxLen);
+      let segmentIndex = cumulativeDistances.length - 2;
+      for (let i = 0; i < cumulativeDistances.length - 1; i += 1) {
+        if (clampedDistance <= cumulativeDistances[i + 1]) {
+          segmentIndex = i;
+          break;
+        }
+      }
+      const startDist = cumulativeDistances[segmentIndex];
+      const endDist = cumulativeDistances[segmentIndex + 1];
+      const span = Math.max(1e-8, endDist - startDist);
+      const t = THREE.MathUtils.clamp((clampedDistance - startDist) / span, 0, 1);
+      const a = styles[segmentIndex] || fallbackStyleResolved;
+      const b = styles[Math.min(styles.length - 1, segmentIndex + 1)] || a;
+      const rollDelta = ((((Number(b.beamRollDeg) || 0) - (Number(a.beamRollDeg) || 0)) + 540) % 360) - 180;
+      return {
+        beamWidthHorizontal: THREE.MathUtils.lerp(Number(a.beamWidthHorizontal) || 0.28, Number(b.beamWidthHorizontal) || Number(a.beamWidthHorizontal) || 0.28, t),
+        beamHeightVertical: THREE.MathUtils.lerp(Number(a.beamHeightVertical) || 0.28, Number(b.beamHeightVertical) || Number(a.beamHeightVertical) || 0.28, t),
+        beamThickness: THREE.MathUtils.lerp(Number(a.beamThickness) || 0, Number(b.beamThickness) || Number(a.beamThickness) || 0, t),
+        beamRollDeg: (Number(a.beamRollDeg) || 0) + (rollDelta * t),
+      };
+    };
+
+    const frames = computeStableCurveFrames(curve, tubularSegments);
+    const rings = [];
+    for (let i = 0; i <= tubularSegments; i += 1) {
+      const styleAtRing = normalizeBeamStyle('rect_tube', resolveInterpolatedStyleAtDistance((approxLen * i) / Math.max(1, tubularSegments))) || fallbackStyleResolved;
+      const width = Math.max(MIN_STYLE_DIMENSION, Number(styleAtRing?.beamWidthHorizontal) || 0.28);
+      const height = Math.max(MIN_STYLE_DIMENSION, Number(styleAtRing?.beamHeightVertical) || 0.28);
+      const rollRad = THREE.MathUtils.degToRad(Number(styleAtRing?.beamRollDeg) || 0);
+      const cosRoll = Math.cos(rollRad);
+      const sinRoll = Math.sin(rollRad);
+      const halfW = width * 0.5;
+      const halfH = height * 0.5;
+      const rotatedProfile = [
+        { x: -halfW, y: halfH },
+        { x: halfW, y: halfH },
+        { x: halfW, y: -halfH },
+        { x: -halfW, y: -halfH },
+      ].map((point) => ({
+        x: (point.x * cosRoll) - (point.y * sinRoll),
+        y: (point.x * sinRoll) + (point.y * cosRoll),
+      }));
+      const center = curve.getPointAt(i / tubularSegments);
+      const normal = frames.normals[i] || new THREE.Vector3(1, 0, 0);
+      const binormal = frames.binormals[i] || new THREE.Vector3(0, 1, 0);
+      const ring = [];
+      for (let j = 0; j < rotatedProfile.length; j += 1) {
+        const sample = rotatedProfile[j];
+        const vertex = center.clone()
+          .addScaledVector(normal, sample.x)
+          .addScaledVector(binormal, sample.y);
+        ring.push(vertex);
+      }
+      rings.push(ring);
+    }
+
+    const positions = [];
+    const indices = [];
+    const pushVertex = (vertex) => {
+      const index = positions.length / 3;
+      positions.push(vertex.x, vertex.y, vertex.z);
+      return index;
+    };
+    const pushIndexedQuad = (a, b, c, d) => {
+      indices.push(a, b, c);
+      indices.push(a, c, d);
+    };
+
+    // Each band owns its own vertices so corners stay hard, while triangles
+    // inside the same band share vertices and therefore share normals.
+    const bandCornerPairs = [
+      [0, 1], // top
+      [1, 2], // right
+      [2, 3], // bottom
+      [3, 0], // left
+    ];
+    const bandVertexIndices = bandCornerPairs.map(() => []);
+    bandCornerPairs.forEach(([cornerA, cornerB], bandIndex) => {
+      for (let i = 0; i < rings.length; i += 1) {
+        const ring = rings[i];
+        const row = [
+          pushVertex(ring[cornerA]),
+          pushVertex(ring[cornerB]),
+        ];
+        bandVertexIndices[bandIndex].push(row);
+      }
+      for (let i = 0; i < tubularSegments; i += 1) {
+        const current = bandVertexIndices[bandIndex][i];
+        const next = bandVertexIndices[bandIndex][i + 1];
+        pushIndexedQuad(current[0], next[0], next[1], current[1]);
+      }
+    });
+
+    const start = rings[0];
+    const end = rings[rings.length - 1];
+    const startIndices = [
+      pushVertex(start[0]),
+      pushVertex(start[1]),
+      pushVertex(start[2]),
+      pushVertex(start[3]),
+    ];
+    const endIndices = [
+      pushVertex(end[0]),
+      pushVertex(end[1]),
+      pushVertex(end[2]),
+      pushVertex(end[3]),
+    ];
+    pushIndexedQuad(startIndices[0], startIndices[1], startIndices[2], startIndices[3]);
+    pushIndexedQuad(endIndices[0], endIndices[3], endIndices[2], endIndices[1]);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox?.();
+    geometry.computeBoundingSphere?.();
+
     const material = createCreatStandardMaterial(BEAM_BASE_COLOR);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = segmentName;
@@ -1119,6 +1552,10 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       // 2点指定時は直線バーとして扱う（多点時の補間は createSegmentsFromPoints 側で生成）。
       return createRoundBarSegmentMesh(start, end, style);
     }
+    if (profile === 'rect_tube') {
+      // 2点指定時は直線角材として扱う（多点時の補間は createSegmentsFromPoints 側で生成）。
+      return createRectBarSegmentMesh(start, end, style);
+    }
     if (profile === 'tubular') {
       return createTubularLightSegmentMesh(start, end, style);
     }
@@ -1194,7 +1631,24 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(mesh.userData || {}),
         steelFrameSegmentPointRefs: pointRefs,
         steelFrameSegmentProfile: segmentProfile,
-        steelFrameSegmentStyle: segmentStyle ? { ...segmentStyle } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(segmentStyle),
+      };
+      scene.add(mesh);
+      segmentMeshes.push(mesh);
+      created.push(mesh);
+      return created;
+    }
+    if (segmentProfile === 'rect_tube') {
+      const pointRefs = points.filter((item) => item?.userData?.steelFramePoint);
+      if (pointRefs.length < 2) { return created; }
+      const segmentStyle = normalizeBeamStyle(segmentProfile, null);
+      const mesh = createInterpolatedRectTubeSegmentMesh(pointRefs, segmentStyle);
+      if (!mesh) { return created; }
+      mesh.userData = {
+        ...(mesh.userData || {}),
+        steelFrameSegmentPointRefs: pointRefs,
+        steelFrameSegmentProfile: segmentProfile,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(segmentStyle),
       };
       scene.add(mesh);
       segmentMeshes.push(mesh);
@@ -1211,7 +1665,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(mesh.userData || {}),
         steelFrameSegmentPointRefs: pointRefs,
         steelFrameSegmentProfile: segmentProfile,
-        steelFrameSegmentStyle: segmentStyle ? { ...segmentStyle } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(segmentStyle),
       };
       scene.add(mesh);
       segmentMeshes.push(mesh);
@@ -1231,7 +1685,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(mesh.userData || {}),
         steelFrameSegmentPointRefs: [startMesh, endMesh].filter((item) => item?.userData?.steelFramePoint),
         steelFrameSegmentProfile: segmentProfile,
-        steelFrameSegmentStyle: segmentStyle ? { ...segmentStyle } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(segmentStyle),
       };
       scene.add(mesh);
       segmentMeshes.push(mesh);
@@ -1262,6 +1716,15 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
           return;
         }
         rebuiltMesh = createInterpolatedTubeSegmentMesh(nextRefs, style);
+      } else if (profile === 'rect_tube') {
+        if (nextRefs.length < 2) {
+          if (srcMesh?.parent) {
+            srcMesh.parent.remove(srcMesh);
+          }
+          disposeObject3D(srcMesh);
+          return;
+        }
+        rebuiltMesh = createInterpolatedRectTubeSegmentMesh(nextRefs, style);
       } else if (profile === 'panel_wall') {
         if (nextRefs.length < 4) {
           if (srcMesh?.parent) {
@@ -1297,7 +1760,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(srcMesh.userData || {}),
         steelFrameSegmentPointRefs: nextRefs,
         steelFrameSegmentProfile: profile,
-        steelFrameSegmentStyle: style ? { ...style } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(style),
       };
       rebuiltMesh.visible = srcMesh.visible;
       scene.add(rebuiltMesh);
@@ -1334,6 +1797,10 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         const hasMoved = nextRefs.some((pointMesh) => movedSet.has(pointMesh));
         if (!hasMoved || nextRefs.length < 2) { continue; }
         rebuiltMesh = createInterpolatedTubeSegmentMesh(nextRefs, style);
+      } else if (profile === 'rect_tube') {
+        const hasMoved = nextRefs.some((pointMesh) => movedSet.has(pointMesh));
+        if (!hasMoved || nextRefs.length < 2) { continue; }
+        rebuiltMesh = createInterpolatedRectTubeSegmentMesh(nextRefs, style);
       } else if (profile === 'panel_wall') {
         const hasMoved = nextRefs.some((pointMesh) => movedSet.has(pointMesh));
         if (!hasMoved || nextRefs.length < 4) { continue; }
@@ -1354,7 +1821,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(srcMesh.userData || {}),
         steelFrameSegmentPointRefs: nextRefs,
         steelFrameSegmentProfile: profile,
-        steelFrameSegmentStyle: style ? { ...style } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(style),
       };
       if (replaceSegmentMesh(srcMesh, rebuiltMesh, i)) {
         rebuilt += 1;
@@ -1418,6 +1885,13 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       steelFrameLine: currentLineIndex,
       steelFrameCopied: Boolean(mesh?.userData?.steelFrameCopied),
     };
+    if (segmentProfile === 'rect_tube') {
+      const defaults = normalizeBeamStyle('rect_tube', null);
+      mesh.userData[POINT_SECTION_STYLE_KEYS.width] = Number(defaults?.beamWidthHorizontal) || 0.28;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.height] = Number(defaults?.beamHeightVertical) || 0.28;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.radius] = Number(defaults?.beamThickness) || 0;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.roll] = Number(defaults?.beamRollDeg) || 0;
+    }
     setPointColor(mesh, getDefaultPointColor(mesh));
     mesh.visible = active;
     scene.add(mesh);
@@ -1442,6 +1916,13 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       steelFrameLine: safeLine,
       steelFrameCopied: Boolean(mesh?.userData?.steelFrameCopied),
     };
+    if (!Number.isFinite(Number(mesh.userData?.[POINT_SECTION_STYLE_KEYS.width]))) {
+      const defaults = normalizeBeamStyle('rect_tube', null);
+      mesh.userData[POINT_SECTION_STYLE_KEYS.width] = Number(defaults?.beamWidthHorizontal) || 0.28;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.height] = Number(defaults?.beamHeightVertical) || 0.28;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.radius] = Number(defaults?.beamThickness) || 0;
+      mesh.userData[POINT_SECTION_STYLE_KEYS.roll] = Number(defaults?.beamRollDeg) || 0;
+    }
     if (mesh?.scale?.setScalar) {
       mesh.scale.setScalar(createPointScale);
     }
@@ -1507,7 +1988,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       ...(userData || {}),
       steelFrameSegmentPointRefs: [startMesh, endMesh].filter((item) => item?.userData?.steelFramePoint),
       steelFrameSegmentProfile: resolvedProfile,
-      steelFrameSegmentStyle: resolvedStyle ? { ...resolvedStyle } : null,
+      steelFrameSegmentStyle: compactBeamStyleForStorage(resolvedStyle),
     };
     addExistingSegmentMesh(mesh);
     return mesh;
@@ -1526,7 +2007,10 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     const profile = mesh?.userData?.steelFrameSegmentProfile || null;
     const style = normalizeBeamStyle(profile, mesh?.userData?.steelFrameSegmentStyle || null);
     if (!style) { return null; }
-    return { ...style };
+    return {
+      ...style,
+      ...resolveBeamAppearance(style),
+    };
   }
 
   function applySegmentStyle(meshes, stylePatch = {}) {
@@ -1548,7 +2032,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       if (!next) { return; }
       mesh.userData = {
         ...(mesh.userData || {}),
-        steelFrameSegmentStyle: { ...next },
+        steelFrameSegmentStyle: compactBeamStyleForStorage(next),
       };
       const refs = Array.isArray(mesh?.userData?.steelFrameSegmentPointRefs)
         ? mesh.userData.steelFrameSegmentPointRefs
@@ -1589,6 +2073,9 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       if (profile === 'tube') {
         if (nextRefs.length < 2) { return; }
         rebuiltMesh = createInterpolatedTubeSegmentMesh(nextRefs, style);
+      } else if (profile === 'rect_tube') {
+        if (nextRefs.length < 2) { return; }
+        rebuiltMesh = createInterpolatedRectTubeSegmentMesh(nextRefs, style);
       } else if (profile === 'panel_wall') {
         if (nextRefs.length < 4) { return; }
         rebuiltMesh = createPanelWallMeshFromPoints(nextRefs, style);
@@ -1606,7 +2093,7 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
         ...(srcMesh.userData || {}),
         steelFrameSegmentPointRefs: nextRefs,
         steelFrameSegmentProfile: profile,
-        steelFrameSegmentStyle: style ? { ...style } : null,
+        steelFrameSegmentStyle: compactBeamStyleForStorage(style),
       };
       if (replaceSegmentMesh(srcMesh, rebuiltMesh, idx)) {
         rebuilt += 1;
@@ -1774,6 +2261,8 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
       segmentProfile = 'truss_catenary';
     } else if (profile === 'rect_bar') {
       segmentProfile = 'rect_bar';
+    } else if (profile === 'rect_tube') {
+      segmentProfile = 'rect_tube';
     } else if (profile === 'corrugated_bar') {
       segmentProfile = 'corrugated_bar';
     } else if (profile === 'tubular') {
@@ -1789,6 +2278,21 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
 
   function getGeneratedRecords() {
     return generatedRecords;
+  }
+
+  function refreshSegmentMaterialStyles(meshes = null) {
+    const targets = Array.isArray(meshes)
+      ? meshes.filter((mesh) => mesh?.name === segmentName)
+      : segmentMeshes.slice();
+    targets.forEach((mesh) => applySegmentVisualState(mesh));
+    return { updated: targets.length };
+  }
+
+  function setMaterialReferenceResolver(resolver = null, { refresh = true } = {}) {
+    materialReferenceResolver = typeof resolver === 'function' ? resolver : null;
+    if (refresh) {
+      refreshSegmentMaterialStyles();
+    }
   }
 
   return {
@@ -1822,6 +2326,10 @@ export function createSteelFrameMode(scene, cubeGeometry, cubeMaterial) {
     rebuildSegmentsForPoints,
     rebuildSegmentsForMeshes,
     getSegmentStyle,
+    getPointSectionStyle: getPointSectionStylePatch,
     applySegmentStyle,
+    applyPointSectionStyle,
+    refreshSegmentMaterialStyles,
+    setMaterialReferenceResolver,
   };
 }
